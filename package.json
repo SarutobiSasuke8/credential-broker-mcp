@@ -49,7 +49,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
