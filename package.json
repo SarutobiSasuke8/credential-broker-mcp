@@ -1,0 +1,67 @@
+{
+  "name": "@sarutobi/credential-broker-mcp",
+  "version": "0.1.0",
+  "description": "Local-first MCP credential broker: agents use gated APIs through scoped, audited requests without ever seeing the secret.",
+  "license": "Apache-2.0",
+  "author": "Alexei Udall",
+  "homepage": "https://github.com/SarutobiSasuke8/credential-broker-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SarutobiSasuke8/credential-broker-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SarutobiSasuke8/credential-broker-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "credentials",
+    "api-gateway",
+    "delegated-access"
+  ],
+  "bin": {
+    "credential-broker-stdio": "dist/src/stdio.js"
+  },
+  "exports": {
+    ".": "./dist/src/server.js",
+    "./policy": "./dist/src/policy.js",
+    "./gateway": "./dist/src/gateway.js"
+  },
+  "files": [
+    "dist/src",
+    "config/broker.example.yaml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env --import tsx src/stdio.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/src/stdio.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "minimatch": "10.1.1",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.2",
+    "@types/node": "22.19.15",
+    "eslint": "10.8.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.66.0"
+  }
+}

@@ -1,0 +1,41 @@
+# Broker policy: credentials the broker holds, and what each agent may do
+# with them. Secrets never appear here; env_var names the environment
+# variable that carries the secret at runtime.
+version: 1
+
+credentials:
+  - id: github-readonly
+    description: Fine-grained GitHub PAT scoped to public repo metadata
+    kind: bearer
+    env_var: GITHUB_READONLY_TOKEN
+    base_url: https://api.github.com
+
+  - id: weather
+    description: Example API-key-in-query upstream
+    kind: query
+    env_var: WEATHER_API_KEY
+    param_name: appid
+    base_url: https://api.openweathermap.org/data/2.5
+
+agents:
+  - id: example-researcher
+    display_name: Research Agent
+    enabled: true
+    credentials: [github-readonly, weather]
+    methods: [GET]
+    allow:
+      - /repos/**
+      - /weather
+    deny:
+      - /repos/*/*/keys
+    max_response_bytes: 262144
+
+  - id: example-writer
+    display_name: Writer Agent
+    enabled: true
+    credentials: [github-readonly]
+    methods: [GET, POST]
+    allow:
+      - /repos/example-org/**
+    deny: []
+    max_response_bytes: 262144
