@@ -1,7 +1,13 @@
-# Broker policy: credentials the broker holds, and what each agent may do
-# with them. Secrets never appear here; env_var names the environment
-# variable that carries the secret at runtime.
-version: 1
+# Broker policy: credentials the broker holds, and the named operations each
+# agent may perform with each credential. Secrets never appear here; env_var
+# names the environment variable that carries the secret at runtime.
+#
+# Version 2 grants are per (agent, credential, operation). Nothing granted
+# for one credential widens any other credential. Paths are templates
+# relative to the credential's base path: literal segments, '*' for exactly
+# one segment, or a trailing '**'. Query parameters not listed in
+# query_params are denied. Mutations must state requires_approval explicitly.
+version: 2
 
 credentials:
   - id: github-readonly
@@ -16,26 +22,58 @@ credentials:
     env_var: WEATHER_API_KEY
     param_name: appid
     base_url: https://api.openweathermap.org/data/2.5
+    # Query credentials end up in URLs, which upstream and proxy telemetry
+    # commonly retain. This acknowledgement is mandatory for kind 'query'.
+    high_risk: true
 
 agents:
   - id: example-researcher
     display_name: Research Agent
     enabled: true
-    credentials: [github-readonly, weather]
-    methods: [GET]
-    allow:
-      - /repos/**
-      - /weather
-    deny:
-      - /repos/*/*/keys
     max_response_bytes: 262144
+    grants:
+      - credential: github-readonly
+        operations:
+          - id: read-repo
+            method: GET
+            path: /repos/*/*
+            response_body: true
+          - id: read-repo-contents
+            method: GET
+            path: /repos/*/*/contents/**
+            query_params: [ref]
+            response_body: true
+        deny:
+          - /repos/*/*/keys
+      - credential: weather
+        operations:
+          # Relative to the base path /data/2.5, so this authorises
+          # GET https://api.openweathermap.org/data/2.5/weather?q=...&units=...
+          - id: current-weather
+            method: GET
+            path: /weather
+            query_params: [q, units, lang]
+            response_body: true
 
   - id: example-writer
     display_name: Writer Agent
     enabled: true
-    credentials: [github-readonly]
-    methods: [GET, POST]
-    allow:
-      - /repos/example-org/**
-    deny: []
     max_response_bytes: 262144
+    grants:
+      - credential: github-readonly
+        operations:
+          - id: read-org-repo
+            method: GET
+            path: /repos/example-org/*
+            response_body: true
+          - id: create-issue
+            method: POST
+            path: /repos/example-org/*/issues
+            body:
+              content_types: [application/json]
+              max_bytes: 65536
+            response_body: true
+            # A mutation is a conscious decision: this one needs a live
+            # approval record at execution time (see config/approvals.json).
+            requires_approval: true
+            requires_idempotency_key: true
