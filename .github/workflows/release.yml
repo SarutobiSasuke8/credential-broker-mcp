@@ -1,0 +1,49 @@
+# Release workflow: npm trusted publishing (OIDC) with provenance.
+# This workflow NEVER runs automatically. It is manual-dispatch only, takes
+# an explicit tag, and refuses to publish unless the tag, the package
+# version, and a full local check all agree. There is no long-lived npm
+# token anywhere: the npm side must be configured for trusted publishing
+# (GitHub Actions OIDC) on the @sarutobi-sasuke/credential-broker-mcp
+# package before the first dispatch can succeed.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to publish (e.g. v0.1.0). Must already exist."
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.repository == 'SarutobiSasuke8/credential-broker-mcp'
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC provenance)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Verify tag matches package version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "v${PKG_VERSION}" != "${{ inputs.tag }}" ]; then
+            echo "Tag ${{ inputs.tag }} does not match package version v${PKG_VERSION}." >&2
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run check
+      - run: npm audit --omit=dev --audit-level=low
+      - run: npm run verify:pack
+      - name: Publish with provenance
+        run: npm publish --provenance --access public

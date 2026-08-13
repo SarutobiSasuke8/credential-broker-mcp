@@ -33,13 +33,14 @@
   "exports": {
     ".": "./dist/src/server.js",
     "./policy": "./dist/src/policy.js",
-    "./gateway": "./dist/src/gateway.js",
+    "./engine": "./dist/src/engine.js",
     "./stdio": "./dist/src/stdio.js"
   },
   "files": [
     "dist/src",
     "config/broker.example.yaml",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
@@ -50,11 +51,13 @@
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "check": "npm run typecheck && npm run lint && npm test",
+    "migrate": "node dist/src/migrate.js",
+    "verify:pack": "node scripts/verify-pack.mjs",
+    "prepublishOnly": "npm run check && npm audit --omit=dev --audit-level=low && npm run verify:pack",
     "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "minimatch": "10.2.6",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },
