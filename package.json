@@ -1,5 +1,5 @@
 {
-  "name": "@sarutobi/credential-broker-mcp",
+  "name": "@sarutobi-sasuke/credential-broker-mcp",
   "version": "0.1.0",
   "description": "Local-first MCP credential broker: agents use gated APIs through scoped, audited requests without ever seeing the secret.",
   "license": "Apache-2.0",
@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "minimatch": "10.1.1",
+    "minimatch": "10.2.6",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },

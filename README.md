@@ -97,7 +97,7 @@ Claude Code registration:
   "mcpServers": {
     "credential-broker": {
       "command": "npx",
-      "args": ["-y", "@sarutobi/credential-broker-mcp"],
+      "args": ["-y", "@sarutobi-sasuke/credential-broker-mcp"],
       "env": { "BROKER_AGENT_ID": "researcher" }
     }
   }
