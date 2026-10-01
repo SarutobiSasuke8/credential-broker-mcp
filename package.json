@@ -28,7 +28,8 @@
     "delegated-access"
   ],
   "bin": {
-    "credential-broker-stdio": "dist/src/stdio.js"
+    "credential-broker-stdio": "dist/src/stdio.js",
+    "credential-broker-keys": "dist/src/keys-ui.js"
   },
   "exports": {
     ".": "./dist/src/server.js",
@@ -47,6 +48,7 @@
     "dev": "node --watch --env-file-if-exists=.env --import tsx src/stdio.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/src/stdio.js",
+    "keys": "node --env-file-if-exists=.env dist/src/keys-ui.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",

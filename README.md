@@ -175,11 +175,49 @@ principal's secrets and scrubs every policy credential variable from its
 environment after loading. One broker process serves one principal; never
 share a process between agents.
 
+## Managing keys (Windows)
+
+```bash
+npm install
+npm run keys
+```
+
+This opens a local page in your browser where you:
+
+- **Add an API**: name, base URL, how the key is sent, paste the key, pick
+  the agent. The key goes into Windows Credential Manager; the policy file
+  gets the credential and a read-only grant (GET on any path under the
+  base URL, only the query parameters you list).
+- **Save, replace, test, or remove a key** for any API already in the
+  policy. Test makes one GET with the key and reports the status code
+  only. Keys are write-only: the page never shows one back.
+- **Import keys you already have.** "Find my keys" looks in Windows user
+  environment variables, MCP client configs (Claude Code, Claude Desktop,
+  Cursor), and `.env` files under `Documents` and `C:\Dev` (override with
+  `BROKER_IMPORT_ROOTS`, semicolon-separated). Known providers (OpenRouter,
+  Gemini, ElevenLabs, DigitalOcean, Nansen, TypeSafe, Clerk, CoinGecko,
+  PixelLab, OpenAI, Anthropic, GitHub) can be added as APIs in one click
+  and are tested straight away; anything else is stored only. Values are
+  read by the key manager process and never sent to the page. Wallet keys
+  are flagged and never offered as APIs. Original copies are not touched.
+- **Copy the `claude mcp add` command** that registers the broker for an
+  agent with absolute paths filled in.
+
+Write access (POST, PUT, PATCH, DELETE) is never granted from the page;
+add those operations to the policy by hand. Restart the MCP client after
+changing a key, because the broker loads keys once at start-up.
+
+Keys live in Control Panel > Credential Manager > Windows Credentials as
+`credential-broker/<credential-id>`. An `env_var` value, if set, overrides
+the stored key. The page listens on 127.0.0.1 only, needs a per-run token
+from the printed link, and closes after 30 minutes idle. On other
+platforms, set each credential's `env_var` instead.
+
 ## Running
 
 ```bash
 npm install
-cp config/broker.example.yaml config/broker.yaml   # then edit
+cp config/broker.example.yaml config/broker.yaml   # then edit, or use npm run keys
 BROKER_AGENT_ID=researcher npm start
 ```
 
@@ -191,7 +229,9 @@ Environment:
 | `BROKER_POLICY_FILE` | Policy path. Default `config/broker.yaml`. |
 | `BROKER_AUDIT_FILE` | Audit log path. Default `data/audit.jsonl`. |
 | `BROKER_APPROVALS_FILE` | Approval store path. Default `config/approvals.json`. |
-| *(per credential)* | Each credential's `env_var` carries its secret. |
+| `BROKER_KEYCHAIN` | `off` stops the broker and key manager reading Credential Manager. |
+| `BROKER_KEYS_PORT` | Fixed port for `npm run keys`. Default: a free port. |
+| *(per credential)* | Each credential's `env_var` carries its secret, overriding a stored key. |
 
 Claude Code registration (once published; see the pre-release note above):
 
@@ -224,7 +264,9 @@ Claude Code registration (once published; see the pre-release note above):
   expiring principal tokens through the same engine, matching
   [agent-handoff-mcp](https://github.com/SarutobiSasuke8/agent-handoff-mcp)
 - [ ] Per-credential rate limits and spend counters
-- [ ] Operator CLI: provision, rotate, revoke, approve
+- [x] Key manager page: provision, replace, test, and remove keys (Windows)
+- [ ] Keychain backends for macOS and Linux
+- [ ] Operator CLI: approve, rotate
 
 ## Licence
 

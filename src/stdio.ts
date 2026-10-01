@@ -2,7 +2,8 @@
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { AuditLogger } from "./audit.js";
-import { EnvSecretProvider, FileApprovalStore } from "./engine.js";
+import { FileApprovalStore, loadPrincipalSecrets } from "./engine.js";
+import { platformSecretStore } from "./keychain.js";
 import { loadBrokerPolicy } from "./policy.js";
 import { createBrokerMcpServer } from "./server.js";
 
@@ -29,8 +30,12 @@ if (!policy.agents.has(agentId)) {
 
 // Load only this principal's secrets, then scrub every credential variable
 // from the process environment so child processes and later code cannot
-// read them back.
-const secrets = new EnvSecretProvider(policy, agentId, { scrubEnv: true });
+// read them back. Credentials the environment leaves unset are read from the
+// OS keychain, where the key manager (npm run keys) stores them.
+const secrets = await loadPrincipalSecrets(policy, agentId, {
+  scrubEnv: true,
+  keychain: platformSecretStore(),
+});
 
 const mcpServer = createBrokerMcpServer(
   {
