@@ -56,7 +56,13 @@ Run the broker so the agent cannot simply become someone else:
 5. **Minimal filesystem and process access.** The agent must not be able to
    read the broker's memory, its config directory, or its audit location,
    and must not hold debug/trace privileges over the broker process.
-6. **One principal per process.** Never share one broker process between
+6. **Keychain is per OS user.** Keys saved with `npm run keys` live in
+   Windows Credential Manager, encrypted by DPAPI for the account that ran
+   the key manager. Any process running as that account can read them, as
+   it could a `.env` file. Run the key manager as the broker's dedicated
+   user, never as the agent's user. The page binds 127.0.0.1, requires a
+   per-run token and a loopback Host header, and never returns a key.
+7. **One principal per process.** Never share one broker process between
    agents. Secret material is scoped per principal at load time; separate
    processes keep it that way.
 

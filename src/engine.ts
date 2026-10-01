@@ -73,6 +73,54 @@ export class EnvSecretProvider implements SecretProvider {
   }
 }
 
+/** A fixed set of already-scoped secrets. */
+export class MapSecretProvider implements SecretProvider {
+  public constructor(private readonly secrets: ReadonlyMap<string, string>) {}
+
+  public getSecret(credentialId: string): string | undefined {
+    return this.secrets.get(credentialId);
+  }
+
+  public listSecretValues(): string[] {
+    return [...this.secrets.values()];
+  }
+}
+
+/**
+ * Environment first, then the OS keychain for any granted credential the
+ * environment left unset. An environment value always wins, so existing
+ * .env deployments behave exactly as before. Only the principal's granted
+ * credentials are ever requested from the keychain.
+ */
+export async function loadPrincipalSecrets(
+  policy: BrokerPolicy,
+  principalId: string,
+  options: {
+    env?: Record<string, string | undefined>;
+    scrubEnv?: boolean;
+    keychain?: { getMany(ids: readonly string[]): Promise<Map<string, string>> } | null;
+  } = {},
+): Promise<SecretProvider> {
+  const fromEnv = new EnvSecretProvider(policy, principalId, {
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.scrubEnv !== undefined ? { scrubEnv: options.scrubEnv } : {}),
+  });
+  const agent = policy.agents.get(principalId);
+  const secrets = new Map<string, string>();
+  const missing: string[] = [];
+  for (const credentialId of agent?.grants.keys() ?? []) {
+    const value = fromEnv.getSecret(credentialId);
+    if (value) secrets.set(credentialId, value);
+    else missing.push(credentialId);
+  }
+  if (options.keychain && missing.length > 0) {
+    for (const [credentialId, value] of await options.keychain.getMany(missing)) {
+      secrets.set(credentialId, value);
+    }
+  }
+  return new MapSecretProvider(secrets);
+}
+
 export interface ApprovalRecord {
   id: string;
   agentId: string;

@@ -10,6 +10,15 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Key manager (`npm run keys`): a local page for adding APIs, saving,
+  replacing, testing, and removing keys without touching environment
+  variables. Keys are stored in Windows Credential Manager; the broker
+  reads any granted credential the environment leaves unset from there
+  (`loadPrincipalSecrets`). The page only ever grants read access and
+  validates every policy edit with the broker's own parser, keeping
+  comments and a `.bak` of the previous file. "Find my keys" imports keys
+  already on the machine (user environment, MCP configs, `.env` files)
+  without the values ever reaching the page or the originals being edited.
 - Canonical request model: every URL is parsed once into an immutable
   canonical value; encoded separators, double encoding, controls,
   backslashes, userinfo, non-ASCII path segments, repeated and trailing
