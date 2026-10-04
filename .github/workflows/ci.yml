@@ -8,7 +8,7 @@ on:
 permissions: {}
 
 jobs:
-  check:
+  platform-check:
     strategy:
       fail-fast: false
       matrix:
@@ -31,3 +31,15 @@ jobs:
       - run: npm audit --omit=dev --audit-level=low
       - run: npm run verify:pack
       - run: npm run test:e2e
+
+  # Preserve the status name required by the repository ruleset. The matrix
+  # must succeed in full; failed, cancelled or skipped runs cannot pass it.
+  check:
+    needs: platform-check
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every platform check
+        env:
+          PLATFORM_RESULT: ${{ needs.platform-check.result }}
+        run: test "$PLATFORM_RESULT" = success
