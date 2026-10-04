@@ -112,7 +112,8 @@ test("clean-installed package enforces its stdio boundary", { timeout: 180_000 }
   upstream = createServer((req, res) => {
     hits.push({ method: req.method, url: req.url, authenticated: req.headers.authorization === `Bearer ${secret}` });
     res.setHeader("content-type", "application/json");
-    res.setHeader("set-cookie", `private=${secret}`);
+    // This checks header filtering; secret redaction is exercised in the body.
+    res.setHeader("set-cookie", "fixture=synthetic-cookie-value");
     res.end(JSON.stringify({ marker: "synthetic-response-body", raw: secret, encoded: Buffer.from(secret).toString("base64") }));
   });
   upstream.listen(0, "127.0.0.1");
