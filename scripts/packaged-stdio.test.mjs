@@ -110,7 +110,7 @@ test("clean-installed package enforces its stdio boundary", { timeout: 180_000 }
 
   const hits = [];
   upstream = createServer((req, res) => {
-    hits.push({ method: req.method, url: req.url, auth: req.headers.authorization });
+    hits.push({ method: req.method, url: req.url, authenticated: req.headers.authorization === `Bearer ${secret}` });
     res.setHeader("content-type", "application/json");
     res.setHeader("set-cookie", `private=${secret}`);
     res.end(JSON.stringify({ marker: "synthetic-response-body", raw: secret, encoded: Buffer.from(secret).toString("base64") }));
@@ -221,7 +221,7 @@ agents:
     assert.equal(result.isError, undefined);
     assert.equal(result.structuredContent.status, 200);
     assert.match(result.structuredContent.body, /synthetic-response-body/u);
-    assert.equal(hits[0].auth, `Bearer ${secret}`);
+    assert.equal(hits[0].authenticated, true);
     assert.equal(result.structuredContent.headers["set-cookie"], undefined);
     const metadata = await call("broker_read", { credential: "fixture", url: `${base}/metadata` });
     assert.equal(metadata.structuredContent.status, 200);
