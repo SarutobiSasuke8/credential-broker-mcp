@@ -31,14 +31,17 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22
+          # Trusted publishing requires npm >=11.5.1; Node 24 bundles npm 11.
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
-          if [ "v${PKG_VERSION}" != "${{ inputs.tag }}" ]; then
-            echo "Tag ${{ inputs.tag }} does not match package version v${PKG_VERSION}." >&2
+          if [ "v${PKG_VERSION}" != "$RELEASE_TAG" ]; then
+            echo "Release tag does not match package version v${PKG_VERSION}." >&2
             exit 1
           fi
       - run: npm ci

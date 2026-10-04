@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import YAML from "yaml";
+
 import { evaluate } from "../src/gateway.js";
 import { migrateV1PolicyText } from "../src/migrate.js";
 import { parseBrokerPolicy } from "../src/policy.js";
@@ -80,6 +82,40 @@ agents:
 function fixture() {
   return parseBrokerPolicy(policyFixture);
 }
+
+void test("misspelt disabling and denial fields cannot silently remove restrictions", () => {
+  const disabled = policyFixture.replace("enabled: false", "enabeld: false");
+  assert.throws(() => parseBrokerPolicy(disabled), /enabeld/u);
+  const denied = policyFixture.replace("        deny:", "        denny:");
+  assert.throws(() => parseBrokerPolicy(denied), /denny/u);
+});
+
+void test("unknown policy keys are rejected at every nested schema", () => {
+  const valid = JSON.parse(JSON.stringify(YAML.parse(policyFixture))) as {
+    credentials: Record<string, unknown>[];
+    agents: { grants: { operations: Record<string, unknown>[] }[] }[];
+  };
+  const operation = valid.agents[1]!.grants[0]!.operations[1]!;
+  operation.body = { content_types: ["application/json"], max_bytes: 128 };
+  // Establish that the complete fixture is valid before changing each level.
+  assert.ok(parseBrokerPolicy(JSON.stringify(valid)));
+  for (const select of [
+    (value: typeof valid) => value,
+    (value: typeof valid) => value.credentials[0]!,
+    (value: typeof valid) => value.agents[1]!,
+    (value: typeof valid) => value.agents[1]!.grants[0]!,
+    (value: typeof valid) => value.agents[1]!.grants[0]!.operations[1]!,
+    (value: typeof valid) => value.agents[1]!.grants[0]!.operations[1]!.body,
+  ]) {
+    const candidate = structuredClone(valid);
+    (select(candidate) as Record<string, unknown>).unknown_policy_field = true;
+    assert.throws(() => parseBrokerPolicy(JSON.stringify(candidate)), /unknown_policy_field/u);
+  }
+});
+
+void test("future policy versions cannot be interpreted as version 2", () => {
+  assert.throws(() => parseBrokerPolicy(policyFixture.replace("version: 2", "version: 3")), /version|2/u);
+});
 
 void test("parses a valid v2 policy and normalises base URLs", () => {
   const policy = fixture();

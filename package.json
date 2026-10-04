@@ -52,10 +52,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "test:e2e": "npm run build && node --test scripts/packaged-stdio.test.mjs",
     "check": "npm run typecheck && npm run lint && npm test",
     "migrate": "node dist/src/migrate.js",
     "verify:pack": "node scripts/verify-pack.mjs",
-    "prepublishOnly": "npm run check && npm audit --omit=dev --audit-level=low && npm run verify:pack",
+    "prepublishOnly": "npm run check && npm audit --omit=dev --audit-level=low && npm run verify:pack && npm run test:e2e",
     "prepare": "npm run build"
   },
   "dependencies": {
