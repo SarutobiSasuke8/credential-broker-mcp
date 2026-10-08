@@ -1,0 +1,161 @@
+# Credential Broker MCP contract suite (mcp-eval harness v1).
+#
+# Run with `npm run eval:contract`. The target is eval/target.mjs, which creates a fresh OS temp
+# directory holding a throwaway policy, a fake secret generated for this run, the audit log and
+# the approvals file, starts a loopback-only upstream on 127.0.0.1:47391 that echoes the
+# injected credential back, and then runs the real stdio entrypoint as eval-agent with a
+# minimal environment. Offline (loopback only), no real keys, nothing outside the temp directory.
+#
+# The deny paths are the product. The no-secret guard, error_message '^(?![\s\S]*(...))', runs
+# on every success result that could carry a secret. The fake secret always starts with
+# FAKESECRET42, whose Base64 form always starts with RkFLRVNFQ1JFVDQy, so neither the raw
+# nor the Base64 form may appear anywhere in the text.
+#
+# Golden updates are reviewed code changes: `npx mcp-eval eval/mcp.suite.yaml --update-goldens`
+# locally only, never in CI.
+version: 1
+name: credential-broker-mcp
+timeout_ms: 30000
+target:
+  transport: stdio
+  command: ["node", "target.mjs"]
+contracts:
+  # Five tools. exact: true means a sixth tool, or a missing one, fails.
+  - name: tools_listed
+    expect_tools:
+      - broker_whoami
+      - broker_list_credentials
+      - broker_explain_request
+      - broker_read
+      - broker_mutate
+    exact: true
+
+  # The advertised input schema of every tool, so a silent schema change fails.
+  - name: input_schemas
+    input_schema:
+      broker_whoami: fixtures/whoami.input.schema.json
+      broker_list_credentials: fixtures/list_credentials.input.schema.json
+      broker_explain_request: fixtures/explain_request.input.schema.json
+      broker_read: fixtures/read.input.schema.json
+      broker_mutate: fixtures/mutate.input.schema.json
+
+  # Grants from the throwaway policy, and no secret in the result.
+  - name: whoami_golden
+    tool: broker_whoami
+    input: {}
+    assert:
+      golden: fixtures/whoami.golden.json
+      error_message: '^(?![\s\S]*(FAKESECRET42|RkFLRVNFQ1JFVDQy))'
+
+  # Only the granted credential is listed; eval-unrelated is not. No secret value in the result.
+  - name: list_credentials_golden
+    tool: broker_list_credentials
+    input: {}
+    assert:
+      golden: fixtures/list_credentials.golden.json
+      error_message: '^(?![\s\S]*(FAKESECRET42|RkFLRVNFQ1JFVDQy))'
+
+  # Dry run of a permitted read: decision only, no upstream call, no secret touched.
+  - name: explain_permitted_golden
+    tool: broker_explain_request
+    input: { credential: eval-upstream, method: GET, url: "http://127.0.0.1:47391/api/items/widget-1" }
+    assert:
+      golden: fixtures/explain_permitted.golden.json
+
+  # Happy path through the loopback upstream, which reflects the injected bearer token and its
+  # Base64 form in the body. Both must come back as [REDACTED]. trace_id is random per call.
+  - name: read_redacts_echoed_secret
+    tool: broker_read
+    input: { credential: eval-upstream, url: "http://127.0.0.1:47391/api/items/widget-1" }
+    assert:
+      golden:
+        path: fixtures/read_item.golden.json
+        ignore_paths: [trace_id]
+      error_message: '^(?![\s\S]*(FAKESECRET42|RkFLRVNFQ1JFVDQy))'
+
+  # An operation without response_body: the body is withheld entirely, never relayed.
+  - name: read_withholds_body_without_grant
+    tool: broker_read
+    input: { credential: eval-upstream, url: "http://127.0.0.1:47391/api/meta" }
+    assert:
+      golden:
+        path: fixtures/read_meta.golden.json
+        ignore_paths: [trace_id]
+      error_message: '^(?![\s\S]*(FAKESECRET42|RkFLRVNFQ1JFVDQy))'
+
+  # Deny: a credential id that does not exist anywhere in the policy.
+  - name: deny_unknown_credential
+    tool: broker_read
+    input: { credential: eval-does-not-exist, url: "http://127.0.0.1:47391/api/items/widget-1" }
+    assert:
+      is_error: true
+      error_message: "^Identity 'eval-agent' holds no grant for credential 'eval-does-not-exist'\\.$"
+
+  # Deny: a real credential that is granted to another agent only (out of scope).
+  - name: deny_credential_out_of_scope
+    tool: broker_read
+    input: { credential: eval-unrelated, url: "http://127.0.0.1:47391/other/status" }
+    assert:
+      is_error: true
+      error_message: "^Identity 'eval-agent' holds no grant for credential 'eval-unrelated'\\.$"
+
+  # Deny: a path no operation grants.
+  - name: deny_path_not_granted
+    tool: broker_read
+    input: { credential: eval-upstream, url: "http://127.0.0.1:47391/api/users" }
+    assert:
+      is_error: true
+      error_message: "^No operation for 'eval-agent' on credential 'eval-upstream' covers GET '/api/users'\\. Access is deny-by-default, so an absent grant is a denial, not an oversight\\.$"
+
+  # Deny: an explicit deny rule beats the /items/* allow.
+  - name: deny_rule_beats_allow
+    tool: broker_read
+    input: { credential: eval-upstream, url: "http://127.0.0.1:47391/api/items/admin" }
+    assert:
+      is_error: true
+      error_message: "^Denied by rule '/items/admin'\\. Deny always beats a grant\\.$"
+
+  # Deny: a query parameter the operation does not list.
+  - name: deny_unlisted_query_param
+    tool: broker_read
+    input: { credential: eval-upstream, url: "http://127.0.0.1:47391/api/items/widget-1?debug=1" }
+    assert:
+      is_error: true
+      error_message: "^Query parameter 'debug' is not allowlisted for operation 'read-item'\\. Allowed: \\(none\\)\\.$"
+
+  # Deny: a URL outside the credential's origin. The secret must never be sent there.
+  - name: deny_off_origin_url
+    tool: broker_read
+    input: { credential: eval-upstream, url: "https://example.invalid/api/items/widget-1" }
+    assert:
+      is_error: true
+      error_message: "^URL is outside credential 'eval-upstream' base 'http://127\\.0\\.0\\.1:47391/api'\\. A credential can only be exercised against its own API\\.$"
+
+  # Deny: a mutation that requires an approval, attempted without one.
+  - name: deny_mutation_without_approval
+    tool: broker_mutate
+    input:
+      credential: eval-upstream
+      method: POST
+      url: "http://127.0.0.1:47391/api/items"
+      body: "{\"name\":\"widget\"}"
+      content_type: application/json
+      idempotency_key: eval-key-0001
+    assert:
+      is_error: true
+      error_message: "^Operation 'create-item' requires an approval_id\\. None was supplied\\.$"
+
+  # Deny: broker_read is read-only; a POST is rejected by its input schema.
+  - name: deny_write_method_on_read_tool
+    tool: broker_read
+    input: { credential: eval-upstream, method: POST, url: "http://127.0.0.1:47391/api/items" }
+    assert:
+      is_error: true
+      error_message: "method"
+
+  # Protocol level: an unregistered tool is a JSON-RPC error, not a result.
+  - name: unknown_tool_is_invalid_params
+    tool: broker_reveal_secret
+    input: {}
+    assert:
+      error_code: INVALID_PARAMS

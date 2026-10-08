@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "credential": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "method": {
+      "default": "GET",
+      "enum": [
+        "GET",
+        "HEAD"
+      ],
+      "type": "string"
+    },
+    "url": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "credential",
+    "url"
+  ],
+  "type": "object"
+}
