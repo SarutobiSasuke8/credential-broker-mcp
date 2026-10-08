@@ -10,6 +10,11 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Clean-tarball stdio proof with a synthetic loopback API, checking
+  principal grants, rejected requests, redacted responses, metadata-only
+  output, approval revocation and audit contents. CI covers Windows/Linux
+  on Node 22/24; publication requires this proof.
+
 - Key manager (`npm run keys`): a local page for adding APIs, saving,
   replacing, testing, and removing keys without touching environment
   variables. Keys are stored in Windows Credential Manager; the broker
@@ -55,6 +60,12 @@ unreleased work on `main` towards a first `v0.1.0`.
   Dependabot, SECURITY.md. (#6)
 
 ### Changed
+
+- Reject unknown fields throughout policy v2. Misspelt disabling and deny
+  settings now stop startup instead of silently losing their restrictions.
+  Existing deployments must correct ignored fields before upgrading.
+- Use Node 24 for npm trusted publishing and pass the selected release tag
+  through an environment variable when checking the package version.
 
 - Package moved to the `@sarutobi-sasuke` npm scope with full publish
   metadata.

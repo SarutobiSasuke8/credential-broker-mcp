@@ -51,6 +51,10 @@ capability":
 
 ## Policy (version 2)
 
+Policy objects reject unknown fields at every level. Correct misspelt keys
+and remove unsupported metadata before upgrading; ignored fields could
+otherwise remove a restriction, such as a misspelt `enabled` or `deny`.
+
 One YAML file declares credentials and per-credential operation grants:
 
 ```yaml
@@ -246,6 +250,31 @@ Claude Code registration (once published; see the pre-release note above):
   }
 }
 ```
+
+## Verification
+
+Run `npm run check` for types, lint and unit tests, `npm run verify:pack`
+for the package allowlist, and `npm run test:e2e` for the installed-server
+proof. CI runs these on Windows and Linux with Node 22 and 24.
+
+The end-to-end test packs the project, installs the tarball into an empty
+directory and starts its declared stdio executable. Synthetic credentials
+and a loopback HTTP API exercise tool discovery, principal-scoped grants,
+denials before upstream calls, response redaction, metadata-only responses,
+approval revocation and content-free audits. No production credential,
+OS keychain entry or external API is used. This does not verify the key
+manager UI, secure-launch deployment, independent operator workflows or
+the eventual npm-hosted artifact.
+
+Idempotency keys are required and recorded when the policy says so. They
+are audit identifiers, not upstream deduplication: the broker neither
+forwards them as headers nor suppresses repeated mutations.
+
+The manual release workflow uses Node 24 for the npm trusted-publishing
+toolchain and runs the installed proof through `prepublishOnly` before
+publication. See [npm's trusted-publisher requirements](https://docs.npmjs.com/trusted-publishers/).
+The package's npm trust configuration and the release tag still need
+operator verification before a first publish.
 
 ## What this is not
 

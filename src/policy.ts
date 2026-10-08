@@ -27,12 +27,12 @@ const rawCredentialSchema = z.object({
   param_name: z.string().min(1).max(100).optional(),
   base_url: z.string().url(),
   high_risk: z.boolean().default(false),
-});
+}).strict();
 
 const rawBodySchema = z.object({
   content_types: z.array(z.string().regex(CONTENT_TYPE_PATTERN)).min(1),
   max_bytes: z.number().int().positive().max(1_000_000),
-});
+}).strict();
 
 const rawOperationSchema = z.object({
   id: z.string().regex(ID_PATTERN),
@@ -45,13 +45,13 @@ const rawOperationSchema = z.object({
   requires_approval: z.boolean().optional(),
   requires_idempotency_key: z.boolean().default(false),
   max_response_bytes: z.number().int().positive().max(10_000_000).optional(),
-});
+}).strict();
 
 const rawGrantSchema = z.object({
   credential: z.string(),
   operations: z.array(rawOperationSchema).min(1),
   deny: z.array(z.string().min(1)).default([]),
-});
+}).strict();
 
 const rawAgentSchema = z.object({
   id: z.string().regex(ID_PATTERN),
@@ -59,13 +59,13 @@ const rawAgentSchema = z.object({
   enabled: z.boolean().default(true),
   grants: z.array(rawGrantSchema).min(1),
   max_response_bytes: z.number().int().positive().max(10_000_000).default(262_144),
-});
+}).strict();
 
 const rawPolicySchema = z.object({
   version: z.number().int().positive(),
   credentials: z.array(rawCredentialSchema).min(1),
   agents: z.array(rawAgentSchema).min(1),
-});
+}).strict();
 
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
