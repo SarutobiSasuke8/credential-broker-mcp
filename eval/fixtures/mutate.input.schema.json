@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "approval_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "body": {
+      "maxLength": 1000000,
+      "type": "string"
+    },
+    "content_type": {
+      "maxLength": 200,
+      "type": "string"
+    },
+    "credential": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "method": {
+      "enum": [
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ],
+      "type": "string"
+    },
+    "url": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "credential",
+    "method",
+    "url"
+  ],
+  "type": "object"
+}

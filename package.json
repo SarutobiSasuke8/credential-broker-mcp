@@ -53,6 +53,7 @@
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
     "test:e2e": "npm run build && node --test scripts/packaged-stdio.test.mjs",
+    "eval:contract": "npm run build && mcp-eval eval/mcp.suite.yaml",
     "check": "npm run typecheck && npm run lint && npm test",
     "migrate": "node dist/src/migrate.js",
     "verify:pack": "node scripts/verify-pack.mjs",
@@ -66,6 +67,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.2",
+    "@sarutobi-sasuke/mcp-eval-harness": "github:SarutobiSasuke8/mcp-eval-harness#077c74a60ccd6d9061e35f882ffd3db5f5d17052",
     "@types/node": "22.19.15",
     "eslint": "10.11.0",
     "tsx": "4.23.15",
