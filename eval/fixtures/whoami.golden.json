@@ -1,0 +1,48 @@
+{
+  "agent_id": "eval-agent",
+  "display_name": "Eval Agent",
+  "enabled": true,
+  "grants": [
+    {
+      "credential": "eval-upstream",
+      "deny": [
+        "/items/admin"
+      ],
+      "operations": [
+        {
+          "accepts_body": false,
+          "id": "read-item",
+          "max_response_bytes": 65536,
+          "method": "GET",
+          "path": "/items/*",
+          "query_params": [],
+          "requires_approval": false,
+          "requires_idempotency_key": false,
+          "response_body": true
+        },
+        {
+          "accepts_body": false,
+          "id": "read-meta",
+          "max_response_bytes": 65536,
+          "method": "GET",
+          "path": "/meta",
+          "query_params": [],
+          "requires_approval": false,
+          "requires_idempotency_key": false,
+          "response_body": false
+        },
+        {
+          "accepts_body": true,
+          "id": "create-item",
+          "max_response_bytes": 65536,
+          "method": "POST",
+          "path": "/items",
+          "query_params": [],
+          "requires_approval": true,
+          "requires_idempotency_key": true,
+          "response_body": true
+        }
+      ]
+    }
+  ]
+}

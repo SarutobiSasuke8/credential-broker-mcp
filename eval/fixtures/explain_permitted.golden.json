@@ -1,0 +1,11 @@
+{
+  "allowed": true,
+  "approval_state": "not-required",
+  "deciding_rule": {
+    "pattern": "read-item",
+    "source": "operation-allow"
+  },
+  "operation": "read-item",
+  "reason": "Allowed by operation 'read-item' (GET /items/*) within 'http://127.0.0.1:47391/api'.",
+  "requires_approval": false
+}

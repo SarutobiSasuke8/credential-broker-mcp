@@ -1,0 +1,9 @@
+{
+  "body_withheld": "This operation relays response metadata only. Grant response_body: true in policy to relay bodies.",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "operation": "read-meta",
+  "status": 200,
+  "truncated": false
+}

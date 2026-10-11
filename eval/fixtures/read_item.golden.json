@@ -1,0 +1,9 @@
+{
+  "body": "{\"id\":\"widget-1\",\"name\":\"Synthetic widget\",\"echo_authorization\":\"Bearer [REDACTED]\",\"echo_token_base64\":\"[REDACTED]\"}",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "operation": "read-item",
+  "status": 200,
+  "truncated": false
+}
