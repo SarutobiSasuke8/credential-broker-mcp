@@ -176,7 +176,8 @@ const KIND_LABEL = {
 if (asJson) {
   process.stdout.write(`${JSON.stringify({ strict, count: findings.length, findings }, null, 2)}\n`);
 } else {
-  const escape = (s) => String(s).replace(/\|/gu, "\\|");
+  // Escape backslashes first, then the markdown table separator.
+  const escape = (s) => String(s).replace(/\\/gu, "\\\\").replace(/\|/gu, "\\|");
   const table = [
     `### pin-check: ${findings.length} floating reference${findings.length === 1 ? "" : "s"} (${strict ? "strict" : "report"} mode)`,
     "",
@@ -191,9 +192,13 @@ if (asJson) {
   }
   const markdown = `${table.join("\n")}\n`;
   if (process.env.GITHUB_ACTIONS === "true") {
+    // Workflow-command escaping: data encodes %, CR and LF; properties also encode : and ,
+    const data = (s) => String(s).replace(/%/gu, "%25").replace(/\r/gu, "%0D").replace(/\n/gu, "%0A");
+    const prop = (s) => data(s).replace(/:/gu, "%3A").replace(/,/gu, "%2C");
     for (const f of findings) {
       const level = strict ? "error" : "warning";
-      process.stdout.write(`::${level} file=${f.file},line=${f.line},title=pin-check (${KIND_LABEL[f.kind]})::${f.ref}: ${f.detail}\n`);
+      const title = prop(`pin-check (${KIND_LABEL[f.kind]})`);
+      process.stdout.write(`::${level} file=${prop(f.file)},line=${f.line},title=${title}::${data(`${f.ref}: ${f.detail}`)}\n`);
     }
   }
   if (process.env.GITHUB_STEP_SUMMARY && existsSync(process.env.GITHUB_STEP_SUMMARY)) {
