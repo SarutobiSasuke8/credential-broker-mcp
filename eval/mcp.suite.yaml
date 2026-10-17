@@ -91,7 +91,8 @@ contracts:
       is_error: true
       error_message: "^Identity 'eval-agent' holds no grant for credential 'eval-does-not-exist'\\.$"
 
-  # Deny: a real credential that is granted to another agent only (out of scope).
+  # Deny: a real credential granted to another agent in the same synthetic group.
+  # Group membership alone must never create a credential grant.
   - name: deny_credential_out_of_scope
     tool: broker_read
     input: { credential: eval-unrelated, url: "http://127.0.0.1:47391/other/status" }

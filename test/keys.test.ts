@@ -22,6 +22,28 @@ agents:
             path: /repos/*/*
 `;
 
+void test("multi-agent selection materialises ordinary read grants only", () => {
+  const text = addCredentialToPolicy(BASE, {
+    id: "shared-read", description: "", kind: "bearer", baseUrl: "https://example.com",
+    grant: null,
+    grants: [
+      { agentId: "claude", queryParams: [] },
+      { agentId: "grok", displayName: "Grok", queryParams: ["page"] },
+    ],
+  });
+  const policy = parseBrokerPolicy(text);
+  for (const id of ["claude", "grok"]) {
+    const operations = policy.agents.get(id)?.grants.get("shared-read")?.operations;
+    assert.equal(operations?.length, 1);
+    assert.equal(operations?.[0]?.method, "GET");
+    assert.equal(operations?.[0]?.requiresApproval, false);
+  }
+  assert.throws(() => addCredentialToPolicy(BASE, {
+    id: "dup", description: "", kind: "bearer", baseUrl: "https://example.com", grant: null,
+    grants: [{ agentId: "claude", queryParams: [] }, { agentId: "claude", queryParams: [] }],
+  }), /selected twice/u);
+});
+
 void test("adds a credential with a read grant to an existing agent and keeps comments", () => {
   const text = addCredentialToPolicy(BASE, {
     id: "openai",

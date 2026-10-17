@@ -27,6 +27,12 @@ export interface NewCredentialInput {
     displayName?: string;
     queryParams: string[];
   } | null;
+  /** Selected individuals after group shortcuts have been expanded. */
+  grants?: {
+    agentId: string;
+    displayName?: string | undefined;
+    queryParams: string[];
+  }[];
 }
 
 export const STARTER_POLICY_HEADER =
@@ -75,7 +81,11 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
   if (input.kind === "query") credential.high_risk = true;
   credentials.add(doc.createNode(credential));
 
-  if (input.grant) {
+  const requestedGrants = input.grants ?? (input.grant ? [input.grant] : []);
+  const seenAgents = new Set<string>();
+  for (const requested of requestedGrants) {
+    if (seenAgents.has(requested.agentId)) throw new Error(`Agent '${requested.agentId}' selected twice.`);
+    seenAgents.add(requested.agentId);
     const grant = {
       credential: input.id,
       operations: [
@@ -83,12 +93,12 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
           id: "read",
           method: "GET",
           path: "/**",
-          ...(input.grant.queryParams.length > 0 ? { query_params: input.grant.queryParams } : {}),
+          ...(requested.queryParams.length > 0 ? { query_params: requested.queryParams } : {}),
           response_body: true,
         },
       ],
     };
-    const agent = agents.items.find((item) => YAML.isMap(item) && item.get("id") === input.grant?.agentId);
+    const agent = agents.items.find((item) => YAML.isMap(item) && item.get("id") === requested.agentId);
     if (YAML.isMap(agent)) {
       const grants = agent.get("grants", true);
       if (YAML.isSeq(grants)) grants.add(doc.createNode(grant));
@@ -96,8 +106,8 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
     } else {
       agents.add(
         doc.createNode({
-          id: input.grant.agentId,
-          display_name: input.grant.displayName ?? input.grant.agentId,
+          id: requested.agentId,
+          display_name: requested.displayName ?? requested.agentId,
           enabled: true,
           grants: [grant],
         }),

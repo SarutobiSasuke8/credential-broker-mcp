@@ -59,13 +59,16 @@ const addCredentialSchema = z.object({
   paramName: z.string().regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/u).optional(),
   acknowledgeQueryRisk: z.boolean().default(false),
   value: z.string().default(""),
-  grant: z
-    .object({
-      agentId: ID,
-      displayName: z.string().max(100).optional(),
-      queryParams: z.array(QUERY_KEY).max(50).default([]),
-    })
-    .nullable(),
+  grant: z.object({
+    agentId: ID,
+    displayName: z.string().max(100).optional(),
+    queryParams: z.array(QUERY_KEY).max(50).default([]),
+  }).nullable().optional(),
+  grants: z.array(z.object({
+    agentId: ID,
+    displayName: z.string().max(100).optional(),
+    queryParams: z.array(QUERY_KEY).max(50).default([]),
+  })).max(100).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -113,6 +116,7 @@ async function buildState(): Promise<object> {
         source: secretSource(c, stored),
         note: stored.get(c.id) ?? "",
         grantedTo: [...policy.agents.values()].filter((a) => a.grants.has(c.id)).map((a) => a.id),
+        grantedGroups: [...policy.groups].filter(([, members]) => members.every((id) => policy.agents.get(id)?.grants.has(c.id))).map(([name]) => name),
       }))
     : [];
   const agents = policy ? [...policy.agents.values()].map((a) => ({ id: a.id, displayName: a.displayName, enabled: a.enabled })) : [];
@@ -129,6 +133,7 @@ async function buildState(): Promise<object> {
       .map(([id, note]) => ({ id, note }))
       .sort((a, b) => a.id.localeCompare(b.id)),
     agents,
+    groups: policy ? [...policy.groups].map(([id, members]) => ({ id, members })) : [],
     register: {
       stdioEntry,
       policyFile,
@@ -188,6 +193,9 @@ async function deleteSecret(body: unknown): Promise<object> {
 
 async function addCredential(body: unknown): Promise<object> {
   const input = addCredentialSchema.parse(body);
+  if (input.grant !== undefined && input.grants !== undefined) {
+    throw new HttpError(400, "Use grant or grants, not both.");
+  }
   if ((input.kind === "header" || input.kind === "query") && !input.paramName) {
     throw new HttpError(400, input.kind === "header" ? "Enter the header name, e.g. x-api-key." : "Enter the query parameter name, e.g. api_key.");
   }
@@ -212,6 +220,7 @@ async function addCredential(body: unknown): Promise<object> {
             queryParams: input.grant.queryParams,
           }
         : null,
+      ...(input.grants ? { grants: input.grants } : {}),
     });
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : String(error));

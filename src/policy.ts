@@ -65,6 +65,7 @@ const rawPolicySchema = z.object({
   version: z.number().int().positive(),
   credentials: z.array(rawCredentialSchema).min(1),
   agents: z.array(rawAgentSchema).min(1),
+  groups: z.record(z.string().regex(ID_PATTERN), z.array(z.string().min(1)).min(1)).default({}),
 }).strict();
 
 function isLoopbackHost(hostname: string): boolean {
@@ -233,7 +234,28 @@ export function parseBrokerPolicy(yamlText: string): BrokerPolicy {
     });
   }
 
-  return { version: 2, credentials, agents };
+  const groups = new Map<string, string[]>();
+  for (const [name, members] of Object.entries(parsed.groups)) {
+    if (agents.has(name)) throw new Error(`Group '${name}' conflicts with an agent id.`);
+    if (members.includes("*")) {
+      if (name !== "all" || members.length !== 1) {
+        throw new Error(`Only group 'all' may use '*' as its sole member.`);
+      }
+      groups.set(name, [...agents.keys()]);
+      continue;
+    }
+    if (new Set(members).size !== members.length) {
+      throw new Error(`Group '${name}' repeats an agent id.`);
+    }
+    for (const member of members) {
+      if (!agents.has(member)) {
+        throw new Error(`Group '${name}' references unknown agent '${member}' or another group; nested groups are not supported.`);
+      }
+    }
+    groups.set(name, members);
+  }
+
+  return { version: 2, credentials, agents, groups };
 }
 
 export async function loadBrokerPolicy(filePath: string): Promise<BrokerPolicy> {

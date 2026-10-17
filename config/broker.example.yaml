@@ -9,6 +9,13 @@
 # query_params are denied. Mutations must state requires_approval explicitly.
 version: 2
 
+# Group shortcuts for the key manager. Members must be registered agent ids.
+# Selecting a group writes ordinary per-agent grants; groups never bypass policy.
+groups:
+  hermes: [example-researcher]
+  grokbot: [example-writer]
+  all: ['*']
+
 credentials:
   - id: github-readonly
     description: Fine-grained GitHub PAT scoped to public repo metadata

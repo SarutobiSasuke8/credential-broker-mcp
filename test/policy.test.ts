@@ -79,6 +79,30 @@ agents:
             path: /**
 `;
 
+void test("named groups resolve to registered agents without widening grants", () => {
+  const withGroups = policyFixture.replace("agents:\n", "groups:\n  readers: [reader, writer]\n  all: ['*']\nagents:\n");
+  const policy = parseBrokerPolicy(withGroups);
+  assert.deepEqual(policy.groups.get("readers"), ["reader", "writer"]);
+  assert.deepEqual(policy.groups.get("all"), ["reader", "writer", "disabled-agent"]);
+  assert.equal(policy.agents.get("reader")?.grants.has("local-service"), false);
+  assert.equal(policy.agents.get("writer")?.grants.has("weather"), false);
+  const denied = evaluate(policy, "writer", "weather", { method: "GET", url: "https://api.openweathermap.org/data/2.5/weather" });
+  assert.equal(denied.allowed, false);
+  assert.equal(policy.agents.get("writer")?.grants.get("github")?.operations.find((op) => op.method === "DELETE")?.requiresApproval, true);
+});
+
+void test("malformed, empty, unknown and nested group definitions fail closed", () => {
+  for (const groups of [
+    "groups: []\n",
+    "groups:\n  empty: []\n",
+    "groups:\n  unknown: [ghost]\n",
+    "groups:\n  a: [b]\n  b: [a]\n",
+    "groups:\n  hermes: ['*']\n",
+  ]) {
+    assert.throws(() => parseBrokerPolicy(policyFixture.replace("agents:\n", groups + "agents:\n")));
+  }
+});
+
 function fixture() {
   return parseBrokerPolicy(policyFixture);
 }

@@ -91,6 +91,8 @@ export interface BrokerPolicy {
   version: 2;
   credentials: Map<string, CredentialSpec>;
   agents: Map<string, AgentGrant>;
+  /** Named UI shortcuts. Enforcement always reads concrete agent grants. */
+  groups: Map<string, string[]>;
 }
 
 export type RuleSource =

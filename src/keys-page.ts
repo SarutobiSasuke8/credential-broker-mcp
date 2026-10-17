@@ -53,6 +53,9 @@ button:disabled { opacity: 0.6; cursor: progress; }
 .grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .grid .full { grid-column: 1 / -1; }
 .grid label input, .grid label select { color: var(--ink); font-size: 15px; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 6px; }
+.grid .choices label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+.choices input[type=checkbox] { width: auto; }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); grid-column: 1 / -1; }
 .hint { font-size: 12px; color: var(--muted); }
 .banner { padding: 12px 14px; border-radius: var(--radius); margin-bottom: 16px; font-size: 14px; }
@@ -139,9 +142,11 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
         <input name="value" type="password" placeholder="Paste the key" spellcheck="false">
         <span class="hint">Saved to Windows Credential Manager. Never written to the policy file or shown again.</span>
       </label>
-      <label>Give read access to
-        <select name="agent"></select>
-      </label>
+      <div class="full">Give read access to
+        <div id="grantChoices" class="choices"></div>
+        <span class="hint">Group shortcuts select their current members. The policy stores a separate read grant for each selected agent.</span>
+      </div>
+      <label class="check"><input id="newAgentToggle" type="checkbox"> Add a new agent</label>
       <label id="newAgentWrap" class="hidden">New agent name
         <input name="newAgent" placeholder="claude" pattern="[a-z0-9][a-z0-9._-]{1,63}">
       </label>
@@ -254,7 +259,8 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
     });
 
     var meta = c.baseUrl + " · " + KIND_LABEL[c.kind] + (c.paramName ? " (" + c.paramName + ")" : "") +
-      " · " + (c.grantedTo.length ? "used by " + c.grantedTo.join(", ") : "no agent has access");
+      " · " + (c.grantedTo.length ? "used by " + c.grantedTo.join(", ") : "no agent has access") +
+      (c.grantedGroups.length ? " · groups: " + c.grantedGroups.join(", ") : "");
     var envNote = c.source === "env"
       ? el("p", { className: "hint", text: "Set by " + c.envVar + " in the environment or .env, which overrides a saved key." })
       : c.note ? el("p", { className: "hint", text: c.note }) : null;
@@ -342,14 +348,28 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
     importAgent.value = prevImport && importAgent.querySelector("option[value='" + prevImport + "']") ? prevImport : (state.agents.length ? state.agents[0].id : "__new");
     syncImportAgent();
 
-    var agentSelect = document.querySelector("#add select[name=agent]");
-    var previous = agentSelect.value;
-    agentSelect.innerHTML = "";
-    state.agents.forEach(function (a) { agentSelect.appendChild(el("option", { value: a.id, text: a.displayName && a.displayName !== a.id ? a.displayName + " (" + a.id + ")" : a.id })); });
-    agentSelect.appendChild(el("option", { value: "__new", text: "New agent…" }));
-    if (state.agents.length) agentSelect.appendChild(el("option", { value: "__none", text: "Nobody yet (edit the policy by hand)" }));
-    agentSelect.value = previous && agentSelect.querySelector("option[value='" + previous + "']") ? previous : (state.agents.length ? state.agents[0].id : "__new");
-    syncAgent();
+    var choices = document.getElementById("grantChoices");
+    var selected = new Set(Array.from(choices.querySelectorAll("input[data-agent]:checked"), function (x) { return x.value; }));
+    choices.replaceChildren();
+    state.groups.forEach(function (g) {
+      var box = el("input", { type: "checkbox", value: g.id, "data-group": g.id });
+      box.checked = g.members.every(function (id) { return selected.has(id); });
+      box.addEventListener("change", function () {
+        choices.querySelectorAll("input[data-agent]").forEach(function (member) {
+          if (g.members.includes(member.value)) member.checked = box.checked;
+        });
+        syncGroups();
+      });
+      choices.appendChild(el("label", {}, [box, document.createTextNode("Group: " + g.id)]));
+    });
+    state.agents.forEach(function (a) {
+      var box = el("input", { type: "checkbox", value: a.id, "data-agent": a.id });
+      box.checked = selected.has(a.id);
+      box.addEventListener("change", syncGroups);
+      choices.appendChild(el("label", {}, [box, document.createTextNode(a.displayName && a.displayName !== a.id ? a.displayName + " (" + a.id + ")" : a.id)]));
+    });
+    if (!state.agents.length) document.getElementById("newAgentToggle").checked = true;
+    syncNewAgent();
 
     var connectAgent = document.getElementById("connectAgent");
     var prevConnect = connectAgent.value;
@@ -391,24 +411,29 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
     form.paramName.placeholder = kind === "query" ? "api_key" : "x-api-key";
     document.getElementById("queryRisk").classList.toggle("hidden", kind !== "query");
   }
-  function syncAgent() {
-    document.getElementById("newAgentWrap").classList.toggle("hidden", form.agent.value !== "__new");
+  function syncGroups() {
+    var chosen = new Set(Array.from(document.querySelectorAll("#grantChoices input[data-agent]:checked"), function (x) { return x.value; }));
+    state.groups.forEach(function (g) {
+      var box = Array.from(document.querySelectorAll("#grantChoices input[data-group]")).find(function (x) { return x.value === g.id; });
+      if (box) box.checked = g.members.every(function (id) { return chosen.has(id); });
+    });
+  }
+  function syncNewAgent() {
+    document.getElementById("newAgentWrap").classList.toggle("hidden", !document.getElementById("newAgentToggle").checked);
   }
   form.kind.addEventListener("change", syncKind);
-  form.agent.addEventListener("change", syncAgent);
+  document.getElementById("newAgentToggle").addEventListener("change", syncNewAgent);
   syncKind();
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var result = document.getElementById("addResult");
-    var agentChoice = form.agent.value;
-    var grant = null;
-    if (agentChoice !== "__none") {
-      var agentId = agentChoice === "__new" ? (form.newAgent.value.trim() || "claude") : agentChoice;
-      grant = {
-        agentId: agentId,
-        queryParams: form.queryParams.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean)
-      };
+    var queryParams = form.queryParams.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var grants = Array.from(document.querySelectorAll("#grantChoices input[data-agent]:checked"), function (box) {
+      return { agentId: box.value, queryParams: queryParams };
+    });
+    if (document.getElementById("newAgentToggle").checked) {
+      grants.push({ agentId: form.newAgent.value.trim(), queryParams: queryParams });
     }
     var body = {
       id: form.id.value.trim(),
@@ -417,14 +442,14 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
       kind: form.kind.value,
       acknowledgeQueryRisk: form.acknowledgeQueryRisk.checked,
       value: form.value.value,
-      grant: grant
+      grants: grants
     };
     if (form.paramName.value.trim() && (body.kind === "header" || body.kind === "query")) body.paramName = form.paramName.value.trim();
     var button = form.querySelector("button[type=submit]");
     busy(button, function () {
       return api("/api/credential", body).then(function () {
         say(result, "ok", "Added " + body.id + (body.value ? " with its key." : ". Paste its key in the card above.") + " Restart Claude Code to pick it up.");
-        form.reset(); syncKind();
+        form.reset(); syncKind(); syncNewAgent();
         return refresh();
       }).catch(function (err) { say(result, "bad", err.message); });
     });
