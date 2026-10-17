@@ -55,6 +55,18 @@ groups:
   all: ['*']
   synthetic: [eval-agent, eval-other]
 
+group_grants:
+  - group: synthetic
+    credential: eval-upstream
+    operations:
+      - id: group-read
+        method: GET
+        path: /group-check
+      - id: group-write
+        method: POST
+        path: /group-change
+        requires_approval: true
+
 agents:
   - id: eval-agent
     display_name: Eval Agent

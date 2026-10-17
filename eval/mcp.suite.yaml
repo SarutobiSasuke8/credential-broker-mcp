@@ -62,6 +62,20 @@ contracts:
     assert:
       golden: fixtures/explain_permitted.golden.json
 
+  # A persistent group assignment reaches the same request decision path.
+  - name: explain_group_grant
+    tool: broker_explain_request
+    input: { credential: eval-upstream, method: GET, url: "http://127.0.0.1:47391/api/group-check" }
+    assert:
+      golden: fixtures/explain_group.golden.json
+
+  - name: group_mutation_requires_approval
+    tool: broker_mutate
+    input: { credential: eval-upstream, method: POST, url: "http://127.0.0.1:47391/api/group-change" }
+    assert:
+      is_error: true
+      error_message: "^Operation 'synthetic:group-write' requires an approval_id\\. None was supplied\\.$"
+
   # Happy path through the loopback upstream, which reflects the injected bearer token and its
   # Base64 form in the body. Both must come back as [REDACTED]. trace_id is random per call.
   - name: read_redacts_echoed_secret
