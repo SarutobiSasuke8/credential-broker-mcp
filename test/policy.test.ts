@@ -4,6 +4,7 @@ import test from "node:test";
 import YAML from "yaml";
 
 import { evaluate } from "../src/gateway.js";
+import { effectiveCredentialIds } from "../src/grants.js";
 import { migrateV1PolicyText } from "../src/migrate.js";
 import { parseBrokerPolicy } from "../src/policy.js";
 
@@ -101,6 +102,32 @@ void test("malformed, empty, unknown and nested group definitions fail closed", 
   ]) {
     assert.throws(() => parseBrokerPolicy(policyFixture.replace("agents:\n", groups + "agents:\n")));
   }
+});
+
+void test("assigned group grants follow membership on policy reload and retain denials", () => {
+  const groupRules = `groups:\n  readers: [reader]\ngroup_grants:\n  - group: readers\n    credential: local-service\n    operations:\n      - id: read\n        method: GET\n        path: /**\n    deny: [/private/**]\n`;
+  const source = policyFixture.replace("agents:\n", groupRules + "agents:\n");
+  const first = parseBrokerPolicy(source);
+  assert.deepEqual(effectiveCredentialIds(first, "reader"), ["github", "weather", "local-service"]);
+  assert.equal(evaluate(first, "reader", "local-service", { method: "GET", url: "http://127.0.0.1:8080/public" }).allowed, true);
+  assert.equal(evaluate(first, "reader", "local-service", { method: "GET", url: "http://127.0.0.1:8080/private/key" }).decidingRule?.source, "grant-deny");
+  assert.equal(evaluate(first, "writer", "local-service", { method: "GET", url: "http://127.0.0.1:8080/public" }).allowed, false);
+  const changed = parseBrokerPolicy(source.replace("readers: [reader]", "readers: [reader, writer]"));
+  assert.equal(evaluate(changed, "writer", "local-service", { method: "GET", url: "http://127.0.0.1:8080/public" }).allowed, true);
+  assert.deepEqual(changed.groupAssignments.get("local-service"), ["readers"]);
+});
+
+void test("group denials beat direct grants and group mutations require approval", () => {
+  const groupRules = `groups:\n  readers: [reader]\ngroup_grants:\n  - group: readers\n    credential: github\n    operations:\n      - id: group-read\n        method: GET\n        path: /repos/*/*\n      - id: group-delete\n        method: DELETE\n        path: /repos/*/*\n        requires_approval: true\n    deny: [/repos/*/*/keys]\n`;
+  const source = policyFixture.replace("agents:\n", groupRules + "agents:\n");
+  const policy = parseBrokerPolicy(source);
+  const mutation = evaluate(policy, "reader", "github", { method: "DELETE", url: "https://api.github.com/repos/a/b" });
+  assert.equal(mutation.allowed, true);
+  assert.equal(mutation.operation?.requiresApproval, true);
+  assert.equal(mutation.operation?.id, "readers:group-delete");
+  assert.equal(evaluate(policy, "reader", "github", { method: "GET", url: "https://api.github.com/repos/a/b/keys" }).decidingRule?.source, "grant-deny");
+  assert.throws(() => parseBrokerPolicy(source.replace("requires_approval: true", "requires_approval: false")), /must require approval/u);
+  assert.throws(() => parseBrokerPolicy(source.replace("group: readers", "group: ghost")), /unknown group/u);
 });
 
 function fixture() {

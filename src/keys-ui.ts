@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { scanForKeys } from "./import-scan.js";
+import { effectiveCredentialIds } from "./grants.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
 import { renderKeysPage } from "./keys-page.js";
 import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
@@ -69,6 +70,8 @@ const addCredentialSchema = z.object({
     displayName: z.string().max(100).optional(),
     queryParams: z.array(QUERY_KEY).max(50).default([]),
   })).max(100).optional(),
+  groupIds: z.array(ID).max(100).optional(),
+  groupQueryParams: z.array(QUERY_KEY).max(50).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -115,8 +118,8 @@ async function buildState(): Promise<object> {
         envVar: c.envVar,
         source: secretSource(c, stored),
         note: stored.get(c.id) ?? "",
-        grantedTo: [...policy.agents.values()].filter((a) => a.grants.has(c.id)).map((a) => a.id),
-        grantedGroups: [...policy.groups].filter(([, members]) => members.every((id) => policy.agents.get(id)?.grants.has(c.id))).map(([name]) => name),
+        grantedTo: [...policy.agents.values()].filter((a) => effectiveCredentialIds(policy, a.id).includes(c.id)).map((a) => a.id),
+        grantedGroups: policy.groupAssignments.get(c.id) ?? [],
       }))
     : [];
   const agents = policy ? [...policy.agents.values()].map((a) => ({ id: a.id, displayName: a.displayName, enabled: a.enabled })) : [];
@@ -221,6 +224,8 @@ async function addCredential(body: unknown): Promise<object> {
           }
         : null,
       ...(input.grants ? { grants: input.grants } : {}),
+      ...(input.groupIds ? { groupIds: input.groupIds } : {}),
+      ...(input.groupQueryParams ? { groupQueryParams: input.groupQueryParams } : {}),
     });
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : String(error));

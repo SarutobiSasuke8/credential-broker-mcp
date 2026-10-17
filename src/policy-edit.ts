@@ -27,12 +27,15 @@ export interface NewCredentialInput {
     displayName?: string;
     queryParams: string[];
   } | null;
-  /** Selected individuals after group shortcuts have been expanded. */
+  /** Individually selected agents. */
   grants?: {
     agentId: string;
     displayName?: string | undefined;
     queryParams: string[];
   }[];
+  /** Named groups whose membership is resolved when requests are evaluated. */
+  groupIds?: string[];
+  groupQueryParams?: string[];
 }
 
 export const STARTER_POLICY_HEADER =
@@ -82,6 +85,24 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
   credentials.add(doc.createNode(credential));
 
   const requestedGrants = input.grants ?? (input.grant ? [input.grant] : []);
+  const groupIds = input.groupIds ?? [];
+  if (new Set(groupIds).size !== groupIds.length) throw new Error("A group was selected twice.");
+  if (groupIds.length > 0) {
+    const groupGrants = seqAt(doc, "group_grants");
+    for (const groupId of groupIds) {
+      groupGrants.add(doc.createNode({
+        group: groupId,
+        credential: input.id,
+        operations: [{
+          id: "read",
+          method: "GET",
+          path: "/**",
+          response_body: true,
+          ...(input.groupQueryParams?.length ? { query_params: input.groupQueryParams } : {}),
+        }],
+      }));
+    }
+  }
   const seenAgents = new Set<string>();
   for (const requested of requestedGrants) {
     if (seenAgents.has(requested.agentId)) throw new Error(`Agent '${requested.agentId}' selected twice.`);

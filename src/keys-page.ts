@@ -144,7 +144,7 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
       </label>
       <div class="full">Give read access to
         <div id="grantChoices" class="choices"></div>
-        <span class="hint">Group shortcuts select their current members. The policy stores a separate read grant for each selected agent.</span>
+        <span class="hint">A selected group stays assigned as its membership changes. Uncheck a member to remove that group choice; individual selections are separate read grants.</span>
       </div>
       <label class="check"><input id="newAgentToggle" type="checkbox"> Add a new agent</label>
       <label id="newAgentWrap" class="hidden">New agent name
@@ -350,10 +350,11 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
 
     var choices = document.getElementById("grantChoices");
     var selected = new Set(Array.from(choices.querySelectorAll("input[data-agent]:checked"), function (x) { return x.value; }));
+    var selectedGroups = new Set(Array.from(choices.querySelectorAll("input[data-group]:checked"), function (x) { return x.value; }));
     choices.replaceChildren();
     state.groups.forEach(function (g) {
       var box = el("input", { type: "checkbox", value: g.id, "data-group": g.id });
-      box.checked = g.members.every(function (id) { return selected.has(id); });
+      box.checked = selectedGroups.has(g.id) && g.members.every(function (id) { return selected.has(id); });
       box.addEventListener("change", function () {
         choices.querySelectorAll("input[data-agent]").forEach(function (member) {
           if (g.members.includes(member.value)) member.checked = box.checked;
@@ -415,7 +416,7 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
     var chosen = new Set(Array.from(document.querySelectorAll("#grantChoices input[data-agent]:checked"), function (x) { return x.value; }));
     state.groups.forEach(function (g) {
       var box = Array.from(document.querySelectorAll("#grantChoices input[data-group]")).find(function (x) { return x.value === g.id; });
-      if (box) box.checked = g.members.every(function (id) { return chosen.has(id); });
+      if (box && !g.members.every(function (id) { return chosen.has(id); })) box.checked = false;
     });
   }
   function syncNewAgent() {
@@ -429,9 +430,11 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
     e.preventDefault();
     var result = document.getElementById("addResult");
     var queryParams = form.queryParams.value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var groupIds = Array.from(document.querySelectorAll("#grantChoices input[data-group]:checked"), function (box) { return box.value; });
+    var covered = new Set(state.groups.filter(function (g) { return groupIds.includes(g.id); }).flatMap(function (g) { return g.members; }));
     var grants = Array.from(document.querySelectorAll("#grantChoices input[data-agent]:checked"), function (box) {
       return { agentId: box.value, queryParams: queryParams };
-    });
+    }).filter(function (grant) { return !covered.has(grant.agentId); });
     if (document.getElementById("newAgentToggle").checked) {
       grants.push({ agentId: form.newAgent.value.trim(), queryParams: queryParams });
     }
@@ -442,7 +445,9 @@ h3 { font-size: 14px; margin: 18px 0 4px; }
       kind: form.kind.value,
       acknowledgeQueryRisk: form.acknowledgeQueryRisk.checked,
       value: form.value.value,
-      grants: grants
+      grants: grants,
+      groupIds: groupIds,
+      groupQueryParams: queryParams
     };
     if (form.paramName.value.trim() && (body.kind === "header" || body.kind === "query")) body.paramName = form.paramName.value.trim();
     var button = form.querySelector("button[type=submit]");

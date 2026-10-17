@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { loadPrincipalSecrets } from "../src/engine.js";
+import { effectiveGrant } from "../src/grants.js";
 import { addCredentialToPolicy, envVarFor } from "../src/policy-edit.js";
 import { parseBrokerPolicy } from "../src/policy.js";
 
@@ -42,6 +43,22 @@ void test("multi-agent selection materialises ordinary read grants only", () => 
     id: "dup", description: "", kind: "bearer", baseUrl: "https://example.com", grant: null,
     grants: [{ agentId: "claude", queryParams: [] }, { agentId: "claude", queryParams: [] }],
   }), /selected twice/u);
+});
+
+void test("key manager persists group assignment without individual member grants", () => {
+  const base = BASE.replace("agents:\n", "groups:\n  team: [claude]\nagents:\n");
+  const text = addCredentialToPolicy(base, {
+    id: "group-api", description: "", kind: "bearer", baseUrl: "https://example.com",
+    grant: null, groupIds: ["team"], groupQueryParams: ["page"],
+  });
+  const policy = parseBrokerPolicy(text);
+  assert.deepEqual(policy.groupAssignments.get("group-api"), ["team"]);
+  assert.equal(policy.agents.get("claude")?.grants.has("group-api"), false);
+  assert.deepEqual(effectiveGrant(policy, "claude", "group-api")?.operations[0]?.queryParams, ["page"]);
+  assert.throws(() => addCredentialToPolicy(base, {
+    id: "bad", description: "", kind: "bearer", baseUrl: "https://example.com",
+    grant: null, groupIds: ["ghost"],
+  }), /unknown group/u);
 });
 
 void test("adds a credential with a read grant to an existing agent and keeps comments", () => {
@@ -147,4 +164,20 @@ void test("secrets: no keychain means environment only", async () => {
   const policy = parseBrokerPolicy(BASE);
   const secrets = await loadPrincipalSecrets(policy, "claude", { env: {}, keychain: null });
   assert.equal(secrets.getSecret("github"), undefined);
+});
+
+void test("group-only credentials are loaded only for current group members", async () => {
+  const base = BASE.replace("agents:\n", "groups:\n  team: [claude]\nagents:\n");
+  const policy = parseBrokerPolicy(addCredentialToPolicy(base, {
+    id: "team-api", description: "", kind: "bearer", baseUrl: "https://example.com",
+    grant: null, groupIds: ["team"],
+  }));
+  const requested: string[][] = [];
+  const keychain = { getMany(ids: readonly string[]) {
+    requested.push([...ids]);
+    return Promise.resolve(new Map(ids.map((id) => [id, `secret-${id}`])));
+  } };
+  const memberSecrets = await loadPrincipalSecrets(policy, "claude", { env: {}, keychain });
+  assert.equal(memberSecrets.getSecret("team-api"), "secret-team-api");
+  assert.deepEqual(requested, [["github", "team-api"]]);
 });
