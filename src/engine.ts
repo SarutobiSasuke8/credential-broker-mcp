@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { RedactingAuditSink } from "./audit.js";
 import { canonicalizeRequestUrl, serializeQuery } from "./canonical.js";
 import { evaluate } from "./gateway.js";
+import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
 import { SecretRedactor } from "./redact.js";
 import { isMutationMethod } from "./types.js";
 
@@ -55,9 +56,8 @@ export class EnvSecretProvider implements SecretProvider {
     options: { env?: Record<string, string | undefined>; scrubEnv?: boolean } = {},
   ) {
     const env = options.env ?? process.env;
-    const agent = policy.agents.get(principalId);
     for (const [credentialId, credential] of policy.credentials) {
-      const granted = agent?.grants.has(credentialId) ?? false;
+      const granted = effectiveGrant(policy, principalId, credentialId) !== undefined;
       const value = env[credential.envVar];
       if (granted && value) this.secrets.set(credentialId, value);
       if (options.scrubEnv) delete env[credential.envVar];
@@ -105,10 +105,9 @@ export async function loadPrincipalSecrets(
     ...(options.env ? { env: options.env } : {}),
     ...(options.scrubEnv !== undefined ? { scrubEnv: options.scrubEnv } : {}),
   });
-  const agent = policy.agents.get(principalId);
   const secrets = new Map<string, string>();
   const missing: string[] = [];
-  for (const credentialId of agent?.grants.keys() ?? []) {
+  for (const credentialId of effectiveCredentialIds(policy, principalId)) {
     const value = fromEnv.getSecret(credentialId);
     if (value) secrets.set(credentialId, value);
     else missing.push(credentialId);

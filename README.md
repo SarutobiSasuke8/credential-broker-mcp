@@ -188,9 +188,10 @@ npm run keys
 
 This opens a local page in your browser where you:
 
-- **Add an API**: name, base URL, how the key is sent, paste the key, pick
-  the agent. The key goes into Windows Credential Manager; the policy file
-  gets the credential and a read-only grant (GET on any path under the
+- **Add an API**: name, base URL, how the key is sent, paste the key, then
+  choose individual agents or group shortcuts. The key goes into Windows
+  Credential Manager; the policy file gets persistent group assignments and
+  separate read-only grants for individually selected agents (GET on any path under the
   base URL, only the query parameters you list).
 - **Save, replace, test, or remove a key** for any API already in the
   policy. Test makes one GET with the key and reports the status code
@@ -210,6 +211,17 @@ This opens a local page in your browser where you:
 Write access (POST, PUT, PATCH, DELETE) is never granted from the page;
 add those operations to the policy by hand. Restart the MCP client after
 changing a key, because the broker loads keys once at start-up.
+
+Optional top-level `groups:` in `broker.yaml` maps a name to registered agent
+IDs. `all: ['*']` means every registered agent. The example policy shows
+`hermes`, `grokbot` and `all`; replace their sample members with your own IDs.
+Groups cannot be empty, nested or refer to unknown agents. Selecting a group
+in the key manager writes a `group_grants:` entry for that credential. The
+broker resolves it for the authenticated agent on every request. Editing
+`groups:` changes access after the broker restarts and reloads its policy.
+Membership alone grants nothing; a matching `group_grants:` entry is required.
+Group and direct denials are combined, and group mutations must require
+approval. The key cards show groups actually assigned to each credential.
 
 Keys live in Control Panel > Credential Manager > Windows Credentials as
 `credential-broker/<credential-id>`. An `env_var` value, if set, overrides

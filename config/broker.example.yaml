@@ -9,6 +9,23 @@
 # query_params are denied. Mutations must state requires_approval explicitly.
 version: 2
 
+# Members must be registered agent ids. A group grants nothing until assigned
+# to a credential in group_grants. Membership changes take effect on restart.
+groups:
+  hermes: [example-researcher]
+  grokbot: [example-writer]
+  all: ['*']
+
+# Persistent group assignments use the same operation and deny schema as
+# individual grants. Mutations in a group grant must require approval.
+# group_grants:
+#   - group: hermes
+#     credential: github-readonly
+#     operations:
+#       - id: read
+#         method: GET
+#         path: /**
+
 credentials:
   - id: github-readonly
     description: Fine-grained GitHub PAT scoped to public repo metadata

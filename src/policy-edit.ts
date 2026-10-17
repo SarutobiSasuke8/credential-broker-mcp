@@ -27,6 +27,15 @@ export interface NewCredentialInput {
     displayName?: string;
     queryParams: string[];
   } | null;
+  /** Individually selected agents. */
+  grants?: {
+    agentId: string;
+    displayName?: string | undefined;
+    queryParams: string[];
+  }[];
+  /** Named groups whose membership is resolved when requests are evaluated. */
+  groupIds?: string[];
+  groupQueryParams?: string[];
 }
 
 export const STARTER_POLICY_HEADER =
@@ -75,7 +84,29 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
   if (input.kind === "query") credential.high_risk = true;
   credentials.add(doc.createNode(credential));
 
-  if (input.grant) {
+  const requestedGrants = input.grants ?? (input.grant ? [input.grant] : []);
+  const groupIds = input.groupIds ?? [];
+  if (new Set(groupIds).size !== groupIds.length) throw new Error("A group was selected twice.");
+  if (groupIds.length > 0) {
+    const groupGrants = seqAt(doc, "group_grants");
+    for (const groupId of groupIds) {
+      groupGrants.add(doc.createNode({
+        group: groupId,
+        credential: input.id,
+        operations: [{
+          id: "read",
+          method: "GET",
+          path: "/**",
+          response_body: true,
+          ...(input.groupQueryParams?.length ? { query_params: input.groupQueryParams } : {}),
+        }],
+      }));
+    }
+  }
+  const seenAgents = new Set<string>();
+  for (const requested of requestedGrants) {
+    if (seenAgents.has(requested.agentId)) throw new Error(`Agent '${requested.agentId}' selected twice.`);
+    seenAgents.add(requested.agentId);
     const grant = {
       credential: input.id,
       operations: [
@@ -83,12 +114,12 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
           id: "read",
           method: "GET",
           path: "/**",
-          ...(input.grant.queryParams.length > 0 ? { query_params: input.grant.queryParams } : {}),
+          ...(requested.queryParams.length > 0 ? { query_params: requested.queryParams } : {}),
           response_body: true,
         },
       ],
     };
-    const agent = agents.items.find((item) => YAML.isMap(item) && item.get("id") === input.grant?.agentId);
+    const agent = agents.items.find((item) => YAML.isMap(item) && item.get("id") === requested.agentId);
     if (YAML.isMap(agent)) {
       const grants = agent.get("grants", true);
       if (YAML.isSeq(grants)) grants.add(doc.createNode(grant));
@@ -96,8 +127,8 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
     } else {
       agents.add(
         doc.createNode({
-          id: input.grant.agentId,
-          display_name: input.grant.displayName ?? input.grant.agentId,
+          id: requested.agentId,
+          display_name: requested.displayName ?? requested.agentId,
           enabled: true,
           grants: [grant],
         }),

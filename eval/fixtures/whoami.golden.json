@@ -11,6 +11,28 @@
       "operations": [
         {
           "accepts_body": false,
+          "id": "synthetic:group-read",
+          "max_response_bytes": 65536,
+          "method": "GET",
+          "path": "/group-check",
+          "query_params": [],
+          "requires_approval": false,
+          "requires_idempotency_key": false,
+          "response_body": false
+        },
+        {
+          "accepts_body": false,
+          "id": "synthetic:group-write",
+          "max_response_bytes": 65536,
+          "method": "POST",
+          "path": "/group-change",
+          "query_params": [],
+          "requires_approval": true,
+          "requires_idempotency_key": false,
+          "response_body": false
+        },
+        {
+          "accepts_body": false,
           "id": "read-item",
           "max_response_bytes": 65536,
           "method": "GET",

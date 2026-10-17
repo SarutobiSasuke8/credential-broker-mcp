@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { BrokerEngine } from "./engine.js";
+import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
 
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { AuditSink } from "./audit.js";
@@ -91,7 +92,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
         agent_id: agent.id,
         display_name: agent.displayName,
         enabled: agent.enabled,
-        grants: [...agent.grants.values()].map((grant) => ({
+        grants: effectiveCredentialIds(policy, agentId).map((id) => effectiveGrant(policy, agentId, id)!).map((grant) => ({
           credential: grant.credentialId,
           deny: grant.deny.map((rule) => rule.path),
           operations: grant.operations.map((operation) => ({
@@ -121,7 +122,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
     async () => {
       const agent = policy.agents.get(agentId);
       if (!agent) return errorResult(`Identity '${agentId}' is not provisioned in the policy.`);
-      const granted = [...agent.grants.keys()]
+      const granted = effectiveCredentialIds(policy, agentId)
         .map((id) => policy.credentials.get(id))
         .filter((credential) => credential !== undefined)
         .map((credential) => ({
