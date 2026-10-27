@@ -51,6 +51,22 @@ credentials:
     env_var: CB_EVAL_UNRELATED_TOKEN
     base_url: http://127.0.0.1:${UPSTREAM_PORT}/other
 
+groups:
+  all: ['*']
+  synthetic: [eval-agent, eval-other]
+
+group_grants:
+  - group: synthetic
+    credential: eval-upstream
+    operations:
+      - id: group-read
+        method: GET
+        path: /group-check
+      - id: group-write
+        method: POST
+        path: /group-change
+        requires_approval: true
+
 agents:
   - id: eval-agent
     display_name: Eval Agent

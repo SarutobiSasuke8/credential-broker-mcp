@@ -57,14 +57,18 @@ const rawAgentSchema = z.object({
   id: z.string().regex(ID_PATTERN),
   display_name: z.string().default(""),
   enabled: z.boolean().default(true),
-  grants: z.array(rawGrantSchema).min(1),
+  grants: z.array(rawGrantSchema).default([]),
   max_response_bytes: z.number().int().positive().max(10_000_000).default(262_144),
 }).strict();
+
+const rawGroupGrantSchema = rawGrantSchema.extend({ group: z.string().regex(ID_PATTERN) });
 
 const rawPolicySchema = z.object({
   version: z.number().int().positive(),
   credentials: z.array(rawCredentialSchema).min(1),
   agents: z.array(rawAgentSchema).min(1),
+  groups: z.record(z.string().regex(ID_PATTERN), z.array(z.string().min(1)).min(1)).default({}),
+  group_grants: z.array(rawGroupGrantSchema).default([]),
 }).strict();
 
 function isLoopbackHost(hostname: string): boolean {
@@ -139,6 +143,36 @@ function buildOperation(
   };
 }
 
+function buildGrant(
+  rawGrant: z.infer<typeof rawGrantSchema>,
+  agentId: string,
+  agentMaxResponseBytes: number,
+  credentials: Map<string, CredentialSpec>,
+): CredentialGrant {
+  if (!credentials.has(rawGrant.credential)) {
+    throw new Error(`Agent '${agentId}' references unknown credential '${rawGrant.credential}'.`);
+  }
+  const seenOperationIds = new Set<string>();
+  const operations = rawGrant.operations.map((rawOperation) => {
+    if (seenOperationIds.has(rawOperation.id)) {
+      throw new Error(`Agent '${agentId}', credential '${rawGrant.credential}': duplicate operation id '${rawOperation.id}'.`);
+    }
+    seenOperationIds.add(rawOperation.id);
+    return buildOperation(rawOperation, agentId, rawGrant.credential, agentMaxResponseBytes);
+  });
+  const deny = rawGrant.deny.map((path) => {
+    try {
+      return { path, template: parsePathTemplate(path) };
+    } catch (error) {
+      throw new Error(
+        `Agent '${agentId}', credential '${rawGrant.credential}', deny '${path}': ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  });
+  return { credentialId: rawGrant.credential, operations, deny };
+}
+
 export function parseBrokerPolicy(yamlText: string): BrokerPolicy {
   const yamlValue: unknown = YAML.parse(yamlText);
   // The version gate runs before full validation so a v1 policy gets
@@ -193,37 +227,15 @@ export function parseBrokerPolicy(yamlText: string): BrokerPolicy {
   }
 
   const agents = new Map<string, AgentGrant>();
+  const agentLimits = new Map<string, number>();
   for (const raw of parsed.agents) {
     if (agents.has(raw.id)) throw new Error(`Duplicate agent '${raw.id}'.`);
     const grants = new Map<string, CredentialGrant>();
     for (const rawGrant of raw.grants) {
-      if (!credentials.has(rawGrant.credential)) {
-        throw new Error(`Agent '${raw.id}' references unknown credential '${rawGrant.credential}'.`);
-      }
       if (grants.has(rawGrant.credential)) {
         throw new Error(`Agent '${raw.id}' declares credential '${rawGrant.credential}' twice.`);
       }
-      const seenOperationIds = new Set<string>();
-      const operations = rawGrant.operations.map((rawOperation) => {
-        if (seenOperationIds.has(rawOperation.id)) {
-          throw new Error(
-            `Agent '${raw.id}', credential '${rawGrant.credential}': duplicate operation id '${rawOperation.id}'.`,
-          );
-        }
-        seenOperationIds.add(rawOperation.id);
-        return buildOperation(rawOperation, raw.id, rawGrant.credential, raw.max_response_bytes);
-      });
-      const deny = rawGrant.deny.map((path) => {
-        try {
-          return { path, template: parsePathTemplate(path) };
-        } catch (error) {
-          throw new Error(
-            `Agent '${raw.id}', credential '${rawGrant.credential}', deny '${path}': ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      });
-      grants.set(rawGrant.credential, { credentialId: rawGrant.credential, operations, deny });
+      grants.set(rawGrant.credential, buildGrant(rawGrant, raw.id, raw.max_response_bytes, credentials));
     }
     agents.set(raw.id, {
       id: raw.id,
@@ -231,9 +243,58 @@ export function parseBrokerPolicy(yamlText: string): BrokerPolicy {
       enabled: raw.enabled,
       grants,
     });
+    agentLimits.set(raw.id, raw.max_response_bytes);
   }
 
-  return { version: 2, credentials, agents };
+  const groups = new Map<string, string[]>();
+  for (const [name, members] of Object.entries(parsed.groups)) {
+    if (agents.has(name)) throw new Error(`Group '${name}' conflicts with an agent id.`);
+    if (members.includes("*")) {
+      if (name !== "all" || members.length !== 1) {
+        throw new Error(`Only group 'all' may use '*' as its sole member.`);
+      }
+      groups.set(name, [...agents.keys()]);
+      continue;
+    }
+    if (new Set(members).size !== members.length) {
+      throw new Error(`Group '${name}' repeats an agent id.`);
+    }
+    for (const member of members) {
+      if (!agents.has(member)) {
+        throw new Error(`Group '${name}' references unknown agent '${member}' or another group; nested groups are not supported.`);
+      }
+    }
+    groups.set(name, members);
+  }
+
+  const groupGrants = new Map<string, Map<string, CredentialGrant[]>>();
+  const groupAssignments = new Map<string, string[]>();
+  const seenGroupCredentials = new Set<string>();
+  for (const raw of parsed.group_grants) {
+    const members = groups.get(raw.group);
+    if (!members) throw new Error(`Group grant references unknown group '${raw.group}'.`);
+    if (!credentials.has(raw.credential)) throw new Error(`Group '${raw.group}' references unknown credential '${raw.credential}'.`);
+    const key = `${raw.group}\0${raw.credential}`;
+    if (seenGroupCredentials.has(key)) throw new Error(`Group '${raw.group}' grants credential '${raw.credential}' twice.`);
+    seenGroupCredentials.add(key);
+    for (const operation of raw.operations) {
+      if (isMutationMethod(operation.method) && operation.requires_approval !== true) {
+        throw new Error(`Group '${raw.group}' mutation '${operation.id}' must require approval.`);
+      }
+    }
+    groupAssignments.set(raw.credential, [...(groupAssignments.get(raw.credential) ?? []), raw.group]);
+    for (const member of members) {
+      const maxResponseBytes = agentLimits.get(member);
+      if (maxResponseBytes === undefined) throw new Error(`Group '${raw.group}' references unknown agent '${member}'.`);
+      const grant = buildGrant(raw, member, maxResponseBytes, credentials);
+      grant.operations = grant.operations.map((operation) => ({ ...operation, id: `${raw.group}:${operation.id}` }));
+      const byCredential = groupGrants.get(member) ?? new Map<string, CredentialGrant[]>();
+      byCredential.set(raw.credential, [...(byCredential.get(raw.credential) ?? []), grant]);
+      groupGrants.set(member, byCredential);
+    }
+  }
+
+  return { version: 2, credentials, agents, groups, groupGrants, groupAssignments };
 }
 
 export async function loadBrokerPolicy(filePath: string): Promise<BrokerPolicy> {

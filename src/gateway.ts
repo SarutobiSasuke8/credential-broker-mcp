@@ -1,4 +1,5 @@
 import { canonicalizeRequestUrl, matchPathTemplate } from "./canonical.js";
+import { effectiveGrant } from "./grants.js";
 
 import type { CanonicalRequest } from "./canonical.js";
 import type {
@@ -56,7 +57,7 @@ export function evaluate(
   }
 
   const credential = policy.credentials.get(credentialId);
-  const grant = agent.grants.get(credentialId);
+  const grant = effectiveGrant(policy, agentId, credentialId);
   if (!credential || !grant) {
     return {
       allowed: false,

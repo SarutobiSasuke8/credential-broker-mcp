@@ -91,6 +91,12 @@ export interface BrokerPolicy {
   version: 2;
   credentials: Map<string, CredentialSpec>;
   agents: Map<string, AgentGrant>;
+  /** Named groups, resolved only for registered agents. */
+  groups: Map<string, string[]>;
+  /** Compiled group grants per concrete agent and credential. */
+  groupGrants: Map<string, Map<string, CredentialGrant[]>>;
+  /** Explicit group assignments per credential for key-manager display. */
+  groupAssignments: Map<string, string[]>;
 }
 
 export type RuleSource =

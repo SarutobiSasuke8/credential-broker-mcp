@@ -1,0 +1,11 @@
+{
+  "allowed": true,
+  "approval_state": "not-required",
+  "deciding_rule": {
+    "pattern": "synthetic:group-read",
+    "source": "operation-allow"
+  },
+  "operation": "synthetic:group-read",
+  "reason": "Allowed by operation 'synthetic:group-read' (GET /group-check) within 'http://127.0.0.1:47391/api'.",
+  "requires_approval": false
+}
