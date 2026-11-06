@@ -449,11 +449,13 @@ export class BrokerEngine {
     const url = new URL(outboundHref);
     const headers = new Headers();
     headers.set("accept", "application/json, text/plain;q=0.9, */*;q=0.1");
-    if (request.contentType) headers.set("content-type", request.contentType);
     this.injectCredential(decision.credential, secret, url, headers);
 
     let response: Response;
     try {
+      // Inside the try so a header value Headers rejects still ends the
+      // audit trail in a terminal state instead of escaping as an exception.
+      if (request.contentType) headers.set("content-type", request.contentType);
       response = await this.fetchImpl(url, {
         method: request.method.toUpperCase(),
         headers,

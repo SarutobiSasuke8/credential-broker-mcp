@@ -53,7 +53,6 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 const store = platformSecretStore();
 const token = randomBytes(32).toString("hex");
-const nonce = randomBytes(16).toString("base64");
 
 const ID = z.string().regex(/^[a-z0-9][a-z0-9._-]{1,63}$/u, "Use 2 to 64 lowercase letters, digits, dots, dashes or underscores.");
 const QUERY_KEY = z.string().regex(/^[A-Za-z0-9._~-]{1,100}$/u);
@@ -122,9 +121,7 @@ async function writePolicy(text: string): Promise<void> {
   // A fresh BROKER_POLICY_FILE may point into a folder that does not exist yet.
   await mkdir(dirname(policyFile), { recursive: true });
   if (existsSync(policyFile)) await copyFile(policyFile, `${policyFile}.bak`);
-  const temp = `${policyFile}.tmp-${process.pid}`;
-  await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
-  await rename(temp, policyFile);
+  await writeAtomic(policyFile, text);
   await notifyReload();
 }
 
@@ -132,9 +129,14 @@ async function readPause() {
   return readPauseFile(pauseFile);
 }
 
+/**
+ * Replace a file through a fresh temp name in the same folder. "wx" refuses to
+ * write through anything already at that name, such as a planted link. The
+ * 0600 mode applies on POSIX; Windows relies on the folder's ACLs.
+ */
 async function writeAtomic(file: string, text: string): Promise<void> {
-  const temp = `${file}.tmp-${process.pid}`;
-  await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
+  const temp = `${file}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  await writeFile(temp, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
   await rename(temp, file);
 }
 
@@ -143,9 +145,7 @@ async function readKeyMeta() {
 }
 
 async function writeKeyMeta(file: ReturnType<typeof parseKeyMeta>): Promise<void> {
-  const temp = `${keyNotesFile}.tmp-${process.pid}`;
-  await writeFile(temp, serializeKeyMeta(file), { encoding: "utf8", mode: 0o600 });
-  await rename(temp, keyNotesFile);
+  await writeAtomic(keyNotesFile, serializeKeyMeta(file));
 }
 
 function secretSource(credential: CredentialSpec, stored: Map<string, string>): "env" | "keychain" | "missing" {
@@ -591,14 +591,16 @@ async function applyImport(body: unknown): Promise<object> {
 // HTTP plumbing
 // ---------------------------------------------------------------------------
 
-function send(res: ServerResponse, status: number, contentType: string, payload: string): void {
+/** A fresh CSP nonce per page load. Only the page itself carries scripts or styles. */
+function send(res: ServerResponse, status: number, contentType: string, payload: string, nonce: string | null = null): void {
+  const scripts = nonce ? `'nonce-${nonce}'` : "'none'";
   res.writeHead(status, {
     "content-type": contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
-    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "content-security-policy": `default-src 'none'; script-src ${scripts}; style-src ${scripts}; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   });
   res.end(payload);
 }
@@ -706,7 +708,8 @@ const server = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0];
 
     if (req.method === "GET" && path === "/") {
-      send(res, 200, "text/html; charset=utf-8", renderKeysPage(nonce));
+      const nonce = randomBytes(16).toString("base64");
+      send(res, 200, "text/html; charset=utf-8", renderKeysPage(nonce), nonce);
       return;
     }
     if (req.method === "POST" && path === "/api/close") {

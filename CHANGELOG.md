@@ -8,6 +8,43 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Nothing in this project has been published to npm yet. Everything below is
 unreleased work on `main` towards a first `v0.1.0`.
 
+### Security
+
+Findings from an adversarial review of the engine, key manager, pause and
+reload paths, all fixed here:
+
+- Truncated responses lost a trailing run only when it was a prefix of a
+  secret, which made the cut an oracle an agent could use to recover a key
+  prefix through an upstream that echoes its input. Truncation now removes
+  a fixed amount that depends only on the secrets' lengths.
+- The redactor covered Base64 of the secret only when the secret started a
+  Base64 block. It now covers the secret at byte offsets 1 and 2 inside a
+  larger encoded value, and the JSON string-escaped forms (including `\/`).
+- A path segment such as `..;` passed canonicalisation but is `..` to
+  servlet containers. Any dot segment hidden behind a path parameter is now
+  rejected.
+- A content type that `Headers` rejects (control characters) escaped
+  `execute()` after the `executing` audit line. Content types are now
+  validated as media types with or without a body, and the header is set
+  inside the guarded section.
+- Under hot reload, a policy that no longer listed the broker's identity
+  kept the previous grants live. The identity is now swapped in as
+  disabled with no grants, so every request is denied, and the reload is
+  audited.
+- Pause tamper evidence: a release that arrives through the file (for
+  example a forged resume record) is now audited as `PAUSE_RELEASED`; a
+  file whose revision went backwards is held; a freshly started broker
+  seeds its memory from the audit log so deleting the file and restarting
+  no longer resumes quietly; repairing an unreadable file keeps everything
+  paused unless the request is the explicit resume of all; resume record
+  times are clamped to now; prototype keys such as `constructor` cannot
+  match a pause entry.
+- Key manager: a fresh CSP nonce per page load; temp files use random
+  names and `wx` so a planted link is never written through; SECURITY.md
+  says plainly that the `0600` mode does nothing on NTFS.
+- `mcp-eval.yml` checks out with `persist-credentials: false` like the other
+  workflows.
+
 ### Added
 
 - Key storage on macOS (login keychain through `security -i`, the secret

@@ -17,6 +17,8 @@ import { z } from "zod";
  * - Tamper evidence: a pause is never released by the file going away. Resuming
  *   writes an explicit record ("resumed") into a valid file, and a running
  *   broker that sees an active pause vanish without that record keeps the pause.
+ *   A release that does come through the file is reported too, so the audit
+ *   log shows every release, including one nobody asked for.
  *   This catches accidents and casual tampering. A hostile process running as
  *   the same OS user can still forge a valid file; the real protection against
  *   that is the secure-launch profile in SECURITY.md.
@@ -78,9 +80,31 @@ export function scopeKey(scope: PauseScope): string {
   return scope.kind === "all" ? "all" : `${scope.kind}:${scope.id}`;
 }
 
+/** The inverse of scopeKey, for records read back from the audit log. Null for anything else. */
+export function parseScopeKey(key: string): PauseScope | null {
+  if (key === "all") return { kind: "all" };
+  const [kind, id] = key.split(":");
+  if ((kind === "agent" || kind === "credential") && id) return { kind, id };
+  return null;
+}
+
+/** Own-property lookup, so an id such as "constructor" cannot hit the prototype. */
+function own(table: Record<string, PauseEntry>, id: string): PauseEntry | null {
+  return Object.hasOwn(table, id) ? (table[id] ?? null) : null;
+}
+
 function entryFor(state: PauseState, scope: PauseScope): PauseEntry | null {
   if (scope.kind === "all") return state.all;
-  return (scope.kind === "agent" ? state.agents : state.credentials)[scope.id] ?? null;
+  return own(scope.kind === "agent" ? state.agents : state.credentials, scope.id);
+}
+
+function withEntry(state: PauseState, scope: PauseScope, entry: PauseEntry | null): PauseState {
+  if (scope.kind === "all") return { ...state, all: entry };
+  const key = scope.kind === "agent" ? "agents" : "credentials";
+  const next = { ...state[key] };
+  if (entry) next[scope.id] = entry;
+  else delete next[scope.id];
+  return { ...state, [key]: next };
 }
 
 /**
@@ -93,13 +117,7 @@ export function applyPause(state: PauseState, scope: PauseScope, active: boolean
   const at = now.toISOString();
   const entry: PauseEntry = { at, reason: reason.trim().slice(0, MAX_PAUSE_REASON) };
   const resumed = active ? state.resumed : [...state.resumed, { scope: scopeKey(scope), at }].slice(-MAX_RESUME_RECORDS);
-  const base = { ...state, revision: state.revision + 1, resumed };
-  if (scope.kind === "all") return { ...base, all: active ? entry : null };
-  const key = scope.kind === "agent" ? "agents" : "credentials";
-  const next = { ...state[key] };
-  if (active) next[scope.id] = entry;
-  else delete next[scope.id];
-  return { ...base, [key]: next };
+  return withEntry({ ...state, revision: state.revision + 1, resumed }, scope, active ? entry : null);
 }
 
 function activeScopes(state: PauseState): { scope: PauseScope; entry: PauseEntry }[] {
@@ -115,38 +133,50 @@ export interface Reconciled {
   effective: PauseState;
   /** The scopes that were kept paused because no matching resume record exists. */
   held: PauseScope[];
+  /** The scopes the file released with a matching resume record. */
+  released: PauseScope[];
+}
+
+/** A timestamp for ordering: unparseable means "the beginning", and nothing counts as later than now. */
+function clampTime(iso: string, now: number): number {
+  const parsed = Date.parse(iso);
+  return Number.isNaN(parsed) ? 0 : Math.min(parsed, now);
 }
 
 /**
  * Compares the pause state the broker last enforced with a freshly read, valid
  * file. A pause that is gone from the file is only released when the file
- * carries a resume record for that scope dated at or after the pause itself.
+ * carries a resume record for that scope dated at or after the pause itself,
+ * and the file's revision has not gone backwards (an older copy put back).
  */
-export function reconcilePause(previous: PauseState | null, next: PauseState): Reconciled {
-  if (!previous) return { effective: next, held: [] };
+export function reconcilePause(previous: PauseState | null, next: PauseState, now: Date = new Date()): Reconciled {
+  if (!previous) return { effective: next, held: [], released: [] };
   const held: PauseScope[] = [];
+  const released: PauseScope[] = [];
+  const rolledBack = next.revision < previous.revision;
+  const nowMs = now.getTime();
   let effective = next;
   for (const { scope, entry } of activeScopes(previous)) {
     if (entryFor(next, scope) !== null) continue;
-    const pausedAt = Date.parse(entry.at);
-    const released = next.resumed.some((r) => r.scope === scopeKey(scope) && Date.parse(r.at) >= pausedAt);
-    if (released) continue;
-    held.push(scope);
-    if (scope.kind === "all") {
-      effective = { ...effective, all: entry };
-    } else {
-      const key = scope.kind === "agent" ? "agents" : "credentials";
-      effective = { ...effective, [key]: { ...effective[key], [scope.id]: entry } };
+    const pausedAt = clampTime(entry.at, nowMs);
+    const key = scopeKey(scope);
+    const record = !rolledBack && next.resumed.some((r) => r.scope === key && clampTime(r.at, nowMs) >= pausedAt);
+    if (record) {
+      released.push(scope);
+      continue;
     }
+    held.push(scope);
+    effective = withEntry(effective, scope, entry);
   }
-  return { effective, held };
+  if (held.length > 0 && rolledBack) effective = { ...effective, revision: previous.revision };
+  return { effective, held, released };
 }
 
 export function checkPause(state: PauseState, agentId: string, credentialId: string): PauseCheck {
   if (state.all) return { paused: true, scope: "all", reason: state.all.reason };
-  const agent = state.agents[agentId];
+  const agent = own(state.agents, agentId);
   if (agent) return { paused: true, scope: "agent", reason: agent.reason };
-  const credential = state.credentials[credentialId];
+  const credential = own(state.credentials, credentialId);
   if (credential) return { paused: true, scope: "credential", reason: credential.reason };
   return { paused: false };
 }
@@ -161,7 +191,7 @@ export interface PauseGuard {
 
 /** Something the broker noticed about the pause file that the operator should know. */
 export interface PauseFileEvent {
-  kind: "missing" | "invalid" | "held";
+  kind: "missing" | "invalid" | "held" | "released";
   /** Content-free, fixed wording. Never includes the operator's reason. */
   detail: string;
 }
@@ -169,7 +199,8 @@ export interface PauseFileEvent {
 /**
  * Reads the pause file on every call. See the fail-closed rules above. It also
  * remembers the pause it last enforced, so a pause that disappears from the
- * file without a resume record stays in force and is reported once.
+ * file without a resume record stays in force and is reported once, and a
+ * pause the file does release is reported as well.
  */
 export class FilePauseGuard implements PauseGuard {
   private enforced: PauseState | null = null;
@@ -180,6 +211,15 @@ export class FilePauseGuard implements PauseGuard {
     private readonly onEvent?: (event: PauseFileEvent) => void | Promise<void>,
   ) {}
 
+  /**
+   * Seeds the remembered state before the first request, typically from the
+   * audit log at start-up, so a broker restarted after the file was deleted
+   * or replaced still holds the last pause it can prove.
+   */
+  public prime(state: PauseState): void {
+    if (this.enforced === null && anyPauseActive(state)) this.enforced = state;
+  }
+
   private async report(key: string, event: PauseFileEvent): Promise<void> {
     if (this.reported === key) return;
     this.reported = key;
@@ -187,6 +227,14 @@ export class FilePauseGuard implements PauseGuard {
       await this.onEvent?.(event);
     } catch {
       // A failing audit write must never turn into an open door.
+    }
+  }
+
+  private async notice(event: PauseFileEvent): Promise<void> {
+    try {
+      await this.onEvent?.(event);
+    } catch {
+      // As above.
     }
   }
 
@@ -212,8 +260,11 @@ export class FilePauseGuard implements PauseGuard {
       await this.report("invalid", { kind: "invalid", detail: "pause file is not valid; all access is paused until a valid file is written" });
       return { paused: true, scope: "unreadable", reason: "The pause file is not valid." };
     }
-    const { effective, held } = reconcilePause(this.enforced, parsed.state);
+    const { effective, held, released } = reconcilePause(this.enforced, parsed.state);
     this.enforced = effective;
+    for (const scope of released) {
+      await this.notice({ kind: "released", detail: `pause released by the file for ${scopeKey(scope)}` });
+    }
     if (held.length > 0) {
       await this.report(`held:${held.map(scopeKey).sort().join(",")}`, {
         kind: "held",
