@@ -10,6 +10,19 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Release plumbing for `v0.1.0`: `mcpName` in `package.json` and a
+  `server.json` for the MCP Registry, checked against each other by a test.
+  The installed-package proof now also runs the `credential-broker-pause`
+  binary through pause, status and resume, and starts and closes
+  `credential-broker-keys`. Dependabot updates are grouped.
+- Community files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull
+  request templates, and a supported-versions table in `SECURITY.md`.
+- Docs: a five-minute quickstart at the top of the README, the
+  `broker_request_credential` tool in the tools table, every `BROKER_*`
+  variable in the environment table, and a `docs/` page for each opt-in
+  control (pause, hot reload, key requests, approvals).
+- The key manager creates the policy folder when `BROKER_POLICY_FILE`
+  points somewhere new.
 - Pause safeguards. Pausing everything asks you to type `PAUSE` and resuming
   everything asks for `RESUME`; pausing one agent or key confirms and offers an
   eight second Undo; resuming one confirms. Every pause and resume, from the

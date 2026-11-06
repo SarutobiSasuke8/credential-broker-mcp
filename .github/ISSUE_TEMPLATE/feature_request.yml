@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a change or an addition.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing, read SECURITY.md. The broker's rules (deny by default, secrets never reach an agent, content-free audit, no write grants from the key manager) are not up for a feature request. Anything that keeps them is welcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The change you have in mind, as concretely as you can.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Effect on the security boundary
+      description: Does this let an agent see or do anything it cannot today? If so, say what and why that is acceptable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
