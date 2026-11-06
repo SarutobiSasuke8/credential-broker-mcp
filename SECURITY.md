@@ -34,6 +34,28 @@ What the broker does NOT defend by itself:
 - **Host compromise.** Anything running as the same OS user as the broker
   can read whatever the broker can read.
 
+Operator controls added around that boundary, and what they trust:
+
+- **Pause switch.** `pause.json` (beside the policy) is re-read before every
+  request. It can only narrow access. A missing file means nothing is paused;
+  a file that exists but cannot be read or parsed pauses everything, so a
+  corrupted switch never silently re-opens access. The operator's typed reason
+  is never relayed to the agent or written to the audit; only the scope is.
+  Anyone who can write the policy directory can pause or resume, which is the
+  same trust as editing the policy.
+- **Hot reload (opt-in, `BROKER_HOT_RELOAD=1`).** A marker file written by the
+  key manager makes a running broker rebuild its policy and secrets. It trusts
+  whoever can write the policy directory, exactly as start-up does. A reload
+  that fails keeps the previous state, and a policy that removes the broker's
+  own identity is refused. It cannot change which agent the process is.
+- **Agent key requests (opt-in, `BROKER_ALLOW_KEY_REQUESTS=1`).** The agent
+  can open the key manager for the operator but never receives its address,
+  token or anything typed into it. The base URL comes from the broker's own
+  provider table, never from the agent. Requests are rate limited.
+- **Key manager.** Listens on loopback only with a per-run token. It never
+  grants write access (POST, PUT, PATCH, DELETE). Approvals it creates apply
+  only to operations the policy already marks as requiring approval.
+
 ## Secure-launch profile (stdio)
 
 Run the broker so the agent cannot simply become someone else:

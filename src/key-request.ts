@@ -154,7 +154,7 @@ export async function handleKeyRequest(deps: KeyRequestToolDeps, rawInput: unkno
           message:
             "The key manager has opened on the user's computer. Only the user decides whether to add a key and who may use it, " +
             "and this agent cannot see what they enter. Tell the user what you need it for, then wait. " +
-            "The broker loads keys when it starts, so the MCP client must be restarted before a new key takes effect.",
+            "If hot reload is off, the MCP client must be restarted before a new key takes effect.",
         },
       };
     case "rate_limited":

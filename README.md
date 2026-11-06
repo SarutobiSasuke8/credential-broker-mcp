@@ -209,7 +209,7 @@ This opens a local page in your browser where you:
   agent with absolute paths filled in.
 
 Write access (POST, PUT, PATCH, DELETE) is never granted from the page;
-add those operations to the policy by hand. Restart the MCP client after
+add those operations to the policy by hand. Restart the MCP client (or set `BROKER_HOT_RELOAD=1`, see below) after
 changing a key, because the broker loads keys once at start-up.
 
 Optional top-level `groups:` in `broker.yaml` maps a name to registered agent
@@ -256,6 +256,49 @@ the name and the reason, with a banner saying which agent asked.
   process, and each one writes a content-free audit line.
 - The broker loads keys when it starts, so restart the MCP client after saving.
   The tool is off by default.
+
+### Panic button
+
+The header of the key manager has a red **Pause all access** button. One click
+makes every broker refuse every request on its next call. Nothing is deleted:
+policy, keys and approvals stay as they were, and **Resume** restores access.
+You can also pause one agent (Agents panel) or one key (its card).
+
+From a terminal, when no browser is to hand:
+
+```bash
+npm run pause -- on --reason "key leaked"            # everything
+npm run pause -- on --agent claude                   # one agent
+npm run pause -- on --credential github              # one key
+npm run pause -- off                                 # resume everything
+npm run pause -- status                              # exit code 1 while anything is paused
+```
+
+The switch is the file `pause.json` beside the policy (override with
+`BROKER_PAUSE_FILE`). Brokers re-read it on every request, so it needs no
+restart, and it fails closed: a missing file means nothing is paused, but a file
+that exists and cannot be read pauses everything. Agents are told only that
+access is paused and not to retry; your typed reason stays private.
+
+### Hot reload
+
+Set `BROKER_HOT_RELOAD=1` on a broker process and it picks up key manager
+changes (a new key, a new API, a changed grant) on the next request, with no
+restart. The key manager writes a small marker beside the policy after every
+change. If the new policy is invalid, the broker keeps its previous working
+state and writes an audit line. Off by default.
+
+### Usage, rotation and approvals
+
+- Each key card shows when it was last used, by which agent, and how its last
+  30 days of requests ended, read from the content-free audit log.
+- Replacing a key records the date. For known providers a link opens the
+  provider's key page so you can revoke the old key.
+- The **Approvals** panel creates and revokes approvals for operations the
+  policy marks `requires_approval`, with a lifetime of 1 minute to 24 hours.
+  It cannot approve anything else, and it never grants write access itself.
+- About twenty providers are known (OpenAI, Anthropic, GitHub, Cloudflare,
+  Stripe, itch.io and others); picking one fills in the address and key style.
 
 ## Running
 

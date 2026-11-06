@@ -109,7 +109,8 @@ export type RuleSource =
   | "no-operation"
   | "query-param-not-allowed"
   | "body-not-allowed"
-  | "operation-allow";
+  | "operation-allow"
+  | "operator-pause";
 
 export interface Decision {
   allowed: boolean;

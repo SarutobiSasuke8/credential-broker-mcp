@@ -29,7 +29,8 @@
   ],
   "bin": {
     "credential-broker-stdio": "dist/src/stdio.js",
-    "credential-broker-keys": "dist/src/keys-ui.js"
+    "credential-broker-keys": "dist/src/keys-ui.js",
+    "credential-broker-pause": "dist/src/pause-cli.js"
   },
   "exports": {
     ".": "./dist/src/server.js",
@@ -49,6 +50,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/src/stdio.js",
     "keys": "node --env-file-if-exists=.env dist/src/keys-ui.js",
+    "pause": "node --env-file-if-exists=.env dist/src/pause-cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
