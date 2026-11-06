@@ -4,3 +4,7 @@ data/
 .env
 .env.*
 *.tgz
+config/broker.yaml
+config/broker.yaml.bak*
+config/key-notes.json
+config/approvals.json
