@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,6 +119,8 @@ async function notifyReload(): Promise<void> {
 
 /** Write via a temp file and keep one backup, so a crash never truncates the policy. */
 async function writePolicy(text: string): Promise<void> {
+  // A fresh BROKER_POLICY_FILE may point into a folder that does not exist yet.
+  await mkdir(dirname(policyFile), { recursive: true });
   if (existsSync(policyFile)) await copyFile(policyFile, `${policyFile}.bak`);
   const temp = `${policyFile}.tmp-${process.pid}`;
   await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });

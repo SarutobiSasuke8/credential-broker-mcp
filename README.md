@@ -17,6 +17,49 @@ the defence there, and SECURITY.md states this boundary honestly.
 > **Pre-release.** Nothing is published to npm yet. Treat `main` as a work
 > in progress until a tagged `v0.1.0` exists.
 
+## Five-minute quickstart
+
+Needs Node 22 or 24. Key storage is Windows Credential Manager today; on
+macOS and Linux set each credential's `env_var` instead (see the roadmap).
+
+1. **Pick a folder for your policy** and open the key manager. It prints a
+   link and opens it in your browser.
+
+   ```bash
+   npx -p @sarutobi-sasuke/credential-broker-mcp credential-broker-keys
+   ```
+
+   Set `BROKER_POLICY_FILE` first if you want the policy somewhere other
+   than the package folder, for example `%USERPROFILE%\credential-broker\broker.yaml`.
+   From a clone of this repo, run `npm ci && npm run build` once, then
+   `npm run keys`.
+
+2. **Add one key.** In *Add a key*: short name `github`, base URL
+   `https://api.github.com`, paste a token, tick the agent that may use it
+   (or add a new one called `claude`), press **Add key**. The key goes into
+   Credential Manager and the policy file gets a read-only grant. Press
+   **Test** on the card to prove the key works.
+
+3. **Register with Claude Code.** Open *Connect to Claude Code* at the
+   bottom of the page, pick the agent, copy the `claude mcp add` command and
+   run it. Nothing secret is in that command.
+
+4. **Make a granted call and a denied call.** In Claude Code:
+
+   > Use `broker_explain_request` for a GET to
+   > `https://api.github.com/repos/octocat/hello-world` with credential `github`.
+
+   It answers *allowed* and names the deciding rule. Now ask the same with
+   `DELETE`: *denied*, no grant. Then ask for `broker_read` on the GET and
+   you get the response body with the token redacted wherever it might
+   appear. The audit log (`data/audit.jsonl`) now holds the who, what and
+   outcome, never the content.
+
+5. **Pause and resume.** Press **Pause all access** in the page header and
+   type `PAUSE`. The agent's next call is refused with a message not to
+   retry. Press **Resume all access** and type `RESUME`. From a terminal:
+   `npm run pause -- on` and `npm run pause -- off`.
+
 ## Why
 
 Giving an agent an API key gives it everything the key can do, for as long
@@ -48,6 +91,7 @@ capability":
 | `broker_explain_request` | Dry run: would this request be permitted, which rule decides it, and is an approval required or satisfied? No upstream call, no secret touched. |
 | `broker_read` | GET or HEAD through a granted credential. Honestly annotated read-only. |
 | `broker_mutate` | POST, PUT, PATCH, or DELETE. Annotated destructive and non-idempotent, because its strongest capability is. May require an approval and an idempotency key. |
+| `broker_request_credential` | Opt-in (`BROKER_ALLOW_KEY_REQUESTS=1`). Asks the operator for a key by opening the key manager pre-filled. The agent never sees the page, the token or the key. |
 
 ## Policy (version 2)
 
@@ -314,6 +358,10 @@ restart. The key manager writes a small marker beside the policy after every
 change. If the new policy is invalid, the broker keeps its previous working
 state and writes an audit line. Off by default.
 
+Each opt-in control has a short page saying what it does and what it
+trusts: [pause](docs/pause.md), [hot reload](docs/hot-reload.md),
+[key requests](docs/key-requests.md), [approvals](docs/approvals.md).
+
 ### Usage, rotation and approvals
 
 - Each key card shows when it was last used, by which agent, and how its last
@@ -344,6 +392,11 @@ Environment:
 | `BROKER_APPROVALS_FILE` | Approval store path. Default `config/approvals.json`. |
 | `BROKER_KEYCHAIN` | `off` stops the broker and key manager reading Credential Manager. |
 | `BROKER_KEYS_PORT` | Fixed port for `npm run keys`. Default: a free port. |
+| `BROKER_KEY_NOTES_FILE` | Expiry dates and notes. Default `key-notes.json` beside the policy. |
+| `BROKER_PAUSE_FILE` | The pause switch. Default `pause.json` beside the policy. |
+| `BROKER_RELOAD_MARKER` | Hot reload marker. Default `.broker-reload` beside the policy. |
+| `BROKER_HOT_RELOAD` | `1` lets a running broker pick up key manager changes. Off by default. |
+| `BROKER_ALLOW_KEY_REQUESTS` | `1` enables `broker_request_credential` for this agent. Off by default. |
 | *(per credential)* | Each credential's `env_var` carries its secret, overriding a stored key. |
 
 Claude Code registration (once published; see the pre-release note above):
@@ -370,10 +423,13 @@ The end-to-end test packs the project, installs the tarball into an empty
 directory and starts its declared stdio executable. Synthetic credentials
 and a loopback HTTP API exercise tool discovery, principal-scoped grants,
 denials before upstream calls, response redaction, metadata-only responses,
-approval revocation and content-free audits. No production credential,
-OS keychain entry or external API is used. This does not verify the key
-manager UI, secure-launch deployment, independent operator workflows or
-the eventual npm-hosted artifact.
+approval revocation and content-free audits. It also runs the installed
+`credential-broker-pause` binary through pause, status and resume, and
+starts `credential-broker-keys`, checks its CSP and token gate, and closes
+it. No production credential, OS keychain entry or external API is used.
+This does not verify the key manager page in a browser, secure-launch
+deployment, independent operator workflows or the eventual npm-hosted
+artifact.
 
 Idempotency keys are required and recorded when the policy says so. They
 are audit identifiers, not upstream deduplication: the broker neither

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.SarutobiSasuke8/credential-broker-mcp",
+  "title": "Credential Broker",
+  "description": "Local-first credential broker: agents use gated APIs through scoped, audited requests, never keys.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/SarutobiSasuke8/credential-broker-mcp#readme",
+  "repository": {
+    "url": "https://github.com/SarutobiSasuke8/credential-broker-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@sarutobi-sasuke/credential-broker-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "BROKER_AGENT_ID",
+          "description": "Which agent identity this process is. Must be provisioned in the policy file.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "BROKER_POLICY_FILE",
+          "description": "Path to the policy YAML (version 2). Defaults to config/broker.yaml.",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "BROKER_AUDIT_FILE",
+          "description": "Path to the content-free audit log. Defaults to data/audit.jsonl.",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "BROKER_APPROVALS_FILE",
+          "description": "Path to the approvals file. Defaults to config/approvals.json.",
+          "isRequired": false,
+          "format": "filepath"
+        },
+        {
+          "name": "BROKER_HOT_RELOAD",
+          "description": "Set to 1 to pick up key manager changes without a restart. Off by default.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "BROKER_ALLOW_KEY_REQUESTS",
+          "description": "Set to 1 to let this agent ask the operator for a key through the key manager. Off by default.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

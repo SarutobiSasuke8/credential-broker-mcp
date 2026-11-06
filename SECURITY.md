@@ -9,9 +9,15 @@ You should receive an initial response within seven days.
 
 ## Supported versions
 
-Nothing has been published to npm yet. Until a tagged release exists, the
-`main` branch is a pre-release work in progress and carries no support
-promise. When `v0.1.0` ships, this table will name the supported line.
+| Version | Supported |
+|---|---|
+| `0.1.x` (from the `v0.1.0` tag) | Yes: security fixes land here first. |
+| `main` ahead of the latest tag | Best effort. Treat it as a preview. |
+| Anything older | No. |
+
+Security fixes are released as a patch of the latest minor line. Node 22
+and 24 are the supported runtimes. Nothing has been published to npm until
+the `v0.1.0` tag exists; before that, `main` carries no support promise.
 
 ## Threat model and trust boundary
 
