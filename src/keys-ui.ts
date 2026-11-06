@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { scanForKeys } from "./import-scan.js";
 import { effectiveCredentialIds } from "./grants.js";
+import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
 import { renderKeysPage } from "./keys-page.js";
 import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
@@ -37,6 +38,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(packageRoot, "config", "broker.yaml"));
 const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(packageRoot, "data", "audit.jsonl"));
 const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(packageRoot, "config", "approvals.json"));
+const keyNotesFile = resolve(process.env.BROKER_KEY_NOTES_FILE ?? join(dirname(policyFile), "key-notes.json"));
 const stdioEntry = join(packageRoot, "dist", "src", "stdio.js");
 const requestedPort = Number(process.env.BROKER_KEYS_PORT ?? 0);
 const IDLE_SHUTDOWN_MS = 30 * 60 * 1000;
@@ -52,7 +54,14 @@ const QUERY_KEY = z.string().regex(/^[A-Za-z0-9._~-]{1,100}$/u);
 const saveSecretSchema = z.object({ credentialId: ID, value: z.string() });
 const credentialRefSchema = z.object({ credentialId: ID });
 const testSchema = z.object({ credentialId: ID, path: z.string().max(500).default("") });
+const metaSchema = z.object({
+  credentialId: ID,
+  expires: z.string().max(10).nullable().default(null),
+  note: z.string().max(MAX_NOTE_LENGTH).default(""),
+});
 const addCredentialSchema = z.object({
+  expires: z.string().max(10).nullable().optional(),
+  userNote: z.string().max(MAX_NOTE_LENGTH).optional(),
   id: ID,
   description: z.string().max(200).default(""),
   kind: z.enum(["bearer", "header", "basic", "query"]),
@@ -100,6 +109,16 @@ async function writePolicy(text: string): Promise<void> {
   await rename(temp, policyFile);
 }
 
+async function readKeyMeta() {
+  return parseKeyMeta(existsSync(keyNotesFile) ? await readFile(keyNotesFile, "utf8") : null);
+}
+
+async function writeKeyMeta(file: ReturnType<typeof parseKeyMeta>): Promise<void> {
+  const temp = `${keyNotesFile}.tmp-${process.pid}`;
+  await writeFile(temp, serializeKeyMeta(file), { encoding: "utf8", mode: 0o600 });
+  await rename(temp, keyNotesFile);
+}
+
 function secretSource(credential: CredentialSpec, stored: Map<string, string>): "env" | "keychain" | "missing" {
   if (process.env[credential.envVar]) return "env";
   return stored.has(credential.id) ? "keychain" : "missing";
@@ -108,8 +127,16 @@ function secretSource(credential: CredentialSpec, stored: Map<string, string>): 
 async function buildState(): Promise<object> {
   const { policy, error, exists } = await loadPolicy();
   const stored = new Map((store ? await store.list() : []).map((k) => [k.id, k.comment]));
+  const meta = await readKeyMeta();
+  const now = new Date();
+  const metaFor = (id: string) => {
+    const entry = meta.keys[id];
+    const status = expiryStatus(entry?.expires ?? null, now);
+    return { expires: entry?.expires ?? null, userNote: entry?.note ?? "", expiryState: status.state, expiryDays: status.days };
+  };
   const credentials = policy
     ? [...policy.credentials.values()].map((c) => ({
+        ...metaFor(c.id),
         id: c.id,
         description: c.description,
         kind: c.kind,
@@ -133,8 +160,9 @@ async function buildState(): Promise<object> {
     // Keys housed in the keychain that no API in the policy uses yet.
     storedOnly: [...stored]
       .filter(([id]) => !policy?.credentials.has(id))
-      .map(([id, note]) => ({ id, note }))
+      .map(([id, note]) => ({ ...metaFor(id), id, note }))
       .sort((a, b) => a.id.localeCompare(b.id)),
+    expiryWarningDays: EXPIRY_WARNING_DAYS,
     agents,
     groups: policy ? [...policy.groups].map(([id, members]) => ({ id, members })) : [],
     register: {
@@ -188,6 +216,16 @@ async function saveSecret(body: unknown): Promise<object> {
   return { ok: true };
 }
 
+async function saveMeta(body: unknown): Promise<object> {
+  const input = metaSchema.parse(body);
+  try {
+    await writeKeyMeta(applyMetaUpdate(await readKeyMeta(), input.credentialId, { expires: input.expires, note: input.note }));
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
+  return { ok: true };
+}
+
 async function deleteSecret(body: unknown): Promise<object> {
   const input = credentialRefSchema.parse(body);
   const removed = await requireStore().delete(input.credentialId);
@@ -230,10 +268,21 @@ async function addCredential(body: unknown): Promise<object> {
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : String(error));
   }
+  // Validate expiry and note before anything is written, so a typo in the
+  // date cannot leave a saved key with no policy entry.
+  let nextMeta: ReturnType<typeof parseKeyMeta> | null = null;
+  if (input.expires || input.userNote) {
+    try {
+      nextMeta = applyMetaUpdate(await readKeyMeta(), input.id, { expires: input.expires ?? null, note: input.userNote ?? "" });
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
   // Store the key before touching the policy: a failed keychain write
   // leaves nothing half-done.
   if (value) await requireStore().set(input.id, value);
   await writePolicy(text);
+  if (nextMeta) await writeKeyMeta(nextMeta);
   return { ok: true, envVar: envVarFor(input.id) };
 }
 
@@ -477,6 +526,7 @@ function touch(): void {
 const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/secret": saveSecret,
   "POST /api/secret/delete": deleteSecret,
+  "POST /api/meta": saveMeta,
   "POST /api/credential": addCredential,
   "POST /api/test": testCredential,
   "POST /api/state": () => buildState(),
