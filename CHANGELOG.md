@@ -10,6 +10,12 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Key storage on macOS (login keychain through `security -i`, the secret
+  over stdin) and Linux (Secret Service through `secret-tool`), behind the
+  same `SecretStore` interface as Windows, picked by platform. All three
+  stores run through one command-runner seam and are unit tested with a
+  fake. CI now also runs on macOS. Real round trips on a Mac and a Linux
+  desktop remain a manual check.
 - Release plumbing for `v0.1.0`: `mcpName` in `package.json` and a
   `server.json` for the MCP Registry, checked against each other by a test.
   The installed-package proof now also runs the `credential-broker-pause`
