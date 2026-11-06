@@ -31,7 +31,7 @@ interface Line {
 }
 
 /** Records that are not upstream requests (key requests, reloads, operator pause changes). */
-const NON_REQUEST_METHODS = new Set(["REQUEST_KEY", "RELOAD", "PAUSE", "RESUME", "PAUSE_TAMPER"]);
+const NON_REQUEST_METHODS = new Set(["REQUEST_KEY", "RELOAD", "PAUSE", "RESUME", "PAUSE_TAMPER", "PAUSE_RELEASED"]);
 
 export function summarizeUsage(lines: Iterable<string>, now: Date = new Date()): Map<string, UsageSummary> {
   const cutoff = now.getTime() - USAGE_WINDOW_DAYS * 86_400_000;

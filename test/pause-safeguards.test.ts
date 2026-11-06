@@ -7,8 +7,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { applyPause, EMPTY_PAUSE, FilePauseGuard, parsePauseState, reconcilePause, serializePauseState } from "../src/kill-switch.js";
-import { changePause, confirmationMatches, pauseAuditRecord, readPauseFile } from "../src/pause-admin.js";
+import { applyPause, checkPause, EMPTY_PAUSE, FilePauseGuard, parsePauseState, reconcilePause, serializePauseState } from "../src/kill-switch.js";
+import { changePause, confirmationMatches, pauseAuditRecord, pauseStateFromAudit, readPauseFile } from "../src/pause-admin.js";
 
 import type { PauseFileEvent } from "../src/kill-switch.js";
 
@@ -88,12 +88,12 @@ void test("a pause that vanishes from the file is held unless a resume record da
   assert.equal(halfway.effective.all, null);
   assert.ok(halfway.effective.agents["codex"], "the agent pause is still in the file");
 
-  // Resuming both releases both.
+  // Resuming both releases both, and says so.
   const fully = applyPause(partly, { kind: "agent", id: "codex" }, false, "", T1);
-  assert.deepEqual(reconcilePause(enforced, fully), { effective: fully, held: [] });
+  assert.deepEqual(reconcilePause(enforced, fully), { effective: fully, held: [], released: [{ kind: "all" }, { kind: "agent", id: "codex" }] });
 
   // With nothing enforced yet, the file is taken as it is.
-  assert.deepEqual(reconcilePause(null, EMPTY_PAUSE), { effective: EMPTY_PAUSE, held: [] });
+  assert.deepEqual(reconcilePause(null, EMPTY_PAUSE), { effective: EMPTY_PAUSE, held: [], released: [] });
 });
 
 // ---- the broker guard against a deleted, truncated or replaced file ---------
@@ -132,10 +132,11 @@ void test("the broker stays paused when the pause file is deleted, truncated or 
     await guard.check("claude", "api");
     assert.equal(events.length, heldCount, "the same held state is not reported again");
 
-    // A valid file with an explicit resume record releases it.
+    // A valid file with an explicit resume record releases it, and the release is reported.
     await writeFile(file, serializePauseState(applyPause(EMPTY_PAUSE, { kind: "all" }, false, "", T1)));
     assert.deepEqual(await guard.check("claude", "api"), { paused: false });
-    assert.equal(events.length, heldCount, "a clean resume produces no event");
+    assert.equal(events.length, heldCount + 1, "a clean resume produces one released event");
+    assert.equal(events.at(-1)?.kind, "released");
 
     // After release, deleting the file no longer pauses anything.
     await unlink(file);
@@ -331,4 +332,105 @@ void test("the key manager refuses a global pause or resume without the typed wo
       child.kill();
     }
   });
+});
+
+// ---- review fixes: releases are audited, rollbacks are held, restarts remember ----
+
+void test("a release that arrives through the file is reported, so a forged resume record leaves a trace", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "pause.json");
+    const events: PauseFileEvent[] = [];
+    const guard = new FilePauseGuard(file, (event) => {
+      events.push(event);
+    });
+    await writeFile(file, serializePauseState(applyPause(EMPTY_PAUSE, { kind: "all" }, true, REASON, T0)));
+    assert.equal((await guard.check("claude", "api")).paused, true);
+    // Forged by hand: valid, resumed, future-dated record.
+    await writeFile(file, JSON.stringify({ version: 1, revision: 999, all: null, agents: {}, credentials: {}, resumed: [{ scope: "all", at: "2099-01-01T00:00:00Z" }] }));
+    assert.deepEqual(await guard.check("claude", "api"), { paused: false }, "the design cannot stop a same-user writer");
+    assert.deepEqual(events.map((e) => e.kind), ["released"], "but it says so");
+    assert.match(events[0]?.detail ?? "", /released by the file for all/u);
+    assert.doesNotMatch(JSON.stringify(events), /pastebin/u);
+  });
+});
+
+void test("a file whose revision went backwards is held even when it carries a resume record", () => {
+  const paused = applyPause(applyPause(EMPTY_PAUSE, { kind: "all" }, true, "", T0), { kind: "agent", id: "x" }, true, "", T0);
+  const resumed = applyPause(applyPause(paused, { kind: "all" }, false, "", T1), { kind: "agent", id: "x" }, false, "", T1);
+  assert.equal(resumed.revision, 4);
+  // The broker enforced the paused state at revision 4; an older copy of the
+  // file (revision 1) with the resume records put back must not release.
+  const enforced = { ...paused, revision: 4 };
+  const out = reconcilePause(enforced, { ...resumed, revision: 1 });
+  assert.deepEqual(out.held, [{ kind: "all" }, { kind: "agent", id: "x" }]);
+  assert.deepEqual(out.released, []);
+  assert.equal(out.effective.revision, 4, "the remembered revision is kept");
+  // The same records at a newer revision do release.
+  assert.deepEqual(reconcilePause(enforced, { ...resumed, revision: 5 }).released, [{ kind: "all" }, { kind: "agent", id: "x" }]);
+  // An unparseable pause time counts as the beginning, so a record can still release it.
+  const unparseable = { ...enforced, all: { at: "not a date", reason: "" } };
+  const releasedAnyway = reconcilePause(unparseable, { ...applyPause(EMPTY_PAUSE, { kind: "all" }, false, "", T1), revision: 5 });
+  assert.deepEqual(releasedAnyway.released, [{ kind: "all" }]);
+  assert.deepEqual(releasedAnyway.held, [{ kind: "agent", id: "x" }], "the agent pause has no record and stays held");
+});
+
+void test("the audit log rebuilds the pause state a restarted broker must still hold", async () => {
+  const lines = [
+    { at: T0.toISOString(), method: "PAUSE", pathname: "/all", agentId: "operator" },
+    { at: T0.toISOString(), method: "PAUSE", pathname: "/agent/codex", agentId: "operator" },
+    { at: T1.toISOString(), method: "RESUME", pathname: "/all", agentId: "operator" },
+    { at: T1.toISOString(), method: "PAUSE", pathname: "/credential/api", agentId: "operator" },
+    { at: T1.toISOString(), method: "GET", pathname: "/all", agentId: "claude", outcome: "denied" },
+    { at: T1.toISOString(), method: "PAUSE", pathname: "/agent/Not Valid", agentId: "operator" },
+  ].map((l) => JSON.stringify(l));
+  lines.push("junk", "");
+  const state = pauseStateFromAudit(lines);
+  assert.equal(state.all, null);
+  assert.ok(state.agents["codex"]);
+  assert.ok(state.credentials["api"]);
+  assert.equal(Object.keys(state.agents).length, 1);
+
+  await withTempDir(async (dir) => {
+    const file = join(dir, "pause.json");
+    const events: PauseFileEvent[] = [];
+    // File deleted while the broker was down, then the broker starts.
+    const guard = new FilePauseGuard(file, (event) => {
+      events.push(event);
+    });
+    guard.prime(state);
+    assert.equal((await guard.check("codex", "other")).paused, true, "held from the audit log");
+    assert.equal((await guard.check("claude", "api")).paused, true);
+    assert.deepEqual(await guard.check("claude", "other"), { paused: false });
+    assert.equal(events[0]?.kind, "missing");
+    // A proper resume through the admin path releases it.
+    await changePause({ file, auditFile: null, source: "cli", now: new Date("2026-11-06T13:00:00Z") }, { scope: { kind: "agent", id: "codex" }, active: false, reason: "", undo: false });
+    assert.deepEqual(await guard.check("codex", "other"), { paused: false });
+    assert.equal((await guard.check("claude", "api")).paused, true, "the other pause is still held");
+    // Priming never overrides a state already enforced.
+    guard.prime(applyPause(EMPTY_PAUSE, { kind: "all" }, true, "", T0));
+    assert.deepEqual(await guard.check("codex", "other"), { paused: false });
+  });
+});
+
+void test("repairing an unreadable file keeps everything paused unless the request is the resume of all", async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, "pause.json");
+    const audit = join(dir, "audit.jsonl");
+    await writeFile(file, "{ broken");
+    await changePause({ file, auditFile: audit, source: "page", now: T0 }, { scope: { kind: "agent", id: "claude" }, active: true, reason: "", undo: false });
+    const repaired = await readPauseFile(file);
+    assert.equal(repaired.unreadable, false);
+    assert.ok(repaired.state.all, "everything stays paused after the repair");
+    assert.ok(repaired.state.agents["claude"]);
+    const lines = await auditLines(audit);
+    assert.deepEqual(lines.map((l) => [l["method"], l["pathname"], l["detail"]]), [["PAUSE", "/agent/claude", "page"], ["PAUSE", "/all", "page repair"]]);
+    await changePause({ file, auditFile: audit, source: "cli", now: T1 }, { scope: { kind: "all" }, active: false, reason: "", undo: false });
+    assert.equal((await readPauseFile(file)).state.all, null);
+  });
+});
+
+void test("an agent id that names a prototype property is not treated as paused", () => {
+  const state = applyPause(EMPTY_PAUSE, { kind: "credential", id: "api" }, true, "", T0);
+  assert.deepEqual(checkPause(state, "constructor", "toString"), { paused: false });
+  assert.deepEqual(checkPause(state, "__proto__", "api").paused, true);
 });

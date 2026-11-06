@@ -133,13 +133,18 @@ Operator controls added around that boundary, and what they trust:
   a file that exists but cannot be read or parsed pauses everything, so a
   corrupted switch never silently re-opens access. The operator's typed reason
   is never relayed to the agent or written to the audit; only the scope is.
-  Every pause and resume is audited (scope, direction, source, time).
-  Resuming never deletes the file: it writes an explicit resume record, and a
-  running broker that saw a pause vanish without one keeps the pause and
-  audits `PAUSE_TAMPER`. The typed `PAUSE` and `RESUME` words in the key
-  manager guard against accidents, not attackers. Anyone who can write the
-  policy directory can pause or resume, which is the same trust as editing the
-  policy; a hostile same-user process can forge a valid file, and only the
+  Every pause and resume made through the page or the command is audited
+  (scope, direction, source, time). Resuming never deletes the file: it
+  writes an explicit resume record. A running broker that sees a pause
+  vanish without one keeps the pause and audits `PAUSE_TAMPER`; a release
+  that does arrive through the file is audited as `PAUSE_RELEASED`, so a
+  release with no matching `RESUME` line stands out. At start-up the broker
+  seeds its memory from the audit log, so deleting the file and restarting
+  does not quietly resume either. The typed `PAUSE` and `RESUME` words in
+  the key manager guard against accidents, not attackers. Anyone who can
+  write the policy directory can pause or resume, which is the same trust
+  as editing the policy; a hostile same-user process can still forge a
+  valid file (it will be audited, not prevented), and only the
   secure-launch profile below prevents that.
 - **Hot reload (opt-in, `BROKER_HOT_RELOAD=1`).** A marker file written by the
   key manager makes a running broker rebuild its policy and secrets. It trusts
@@ -161,9 +166,12 @@ Run the broker so the agent cannot simply become someone else:
 1. **Dedicated OS identity.** Run the broker under its own OS user (or
    container), not the operator's interactive account and never the same
    identity the agent runs as.
-2. **Owner-only files.** Policy file, approvals file, audit log, and any
-   `.env` must be readable and writable only by the broker's user. On
-   Windows, set explicit ACLs; on POSIX, `chmod 600`.
+2. **Owner-only files.** Policy file, approvals file, audit log, pause file,
+   key notes and any `.env` must be readable and writable only by the
+   broker's user. On Windows, set explicit ACLs on the folder: the `0600`
+   mode the tools pass when they write is a POSIX permission and does
+   nothing on NTFS. On POSIX, `chmod 600` the files and `chmod 700` the
+   folder.
 3. **Fixed identity wrapper.** Start each agent's broker through a wrapper
    script owned by the broker user that hard-codes `BROKER_AGENT_ID`,
    `BROKER_POLICY_FILE`, `BROKER_AUDIT_FILE`, and `BROKER_APPROVALS_FILE`.

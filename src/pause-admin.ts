@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -64,12 +65,48 @@ export async function readPauseFile(file: string): Promise<{ state: PauseState; 
   return parsed.ok ? { state: parsed.state, exists: true, unreadable: false } : { state: EMPTY_PAUSE, exists: true, unreadable: true };
 }
 
-/** Atomic replace through a temp file in the same folder. Nothing here ever removes the pause file. */
+/**
+ * Atomic replace through a fresh temp file in the same folder ("wx" refuses
+ * to follow anything already there). Nothing here ever removes the pause file.
+ * The 0600 mode applies on POSIX only; Windows uses the folder's ACLs.
+ */
 export async function writePauseFile(file: string, state: PauseState): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
-  const temp = `${file}.tmp-${process.pid}`;
-  await writeFile(temp, serializePauseState(state), { encoding: "utf8", mode: 0o600 });
+  const temp = `${file}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  await writeFile(temp, serializePauseState(state), { encoding: "utf8", mode: 0o600, flag: "wx" });
   await rename(temp, file);
+}
+
+/**
+ * The pause state the audit log can prove: for each scope, the last PAUSE or
+ * RESUME line wins. Used to seed a freshly started broker, so deleting or
+ * replacing the file and restarting the broker does not quietly resume.
+ */
+export function pauseStateFromAudit(lines: Iterable<string>): PauseState {
+  let state = EMPTY_PAUSE;
+  for (const text of lines) {
+    if (!text.trim()) continue;
+    let line: { method?: unknown; pathname?: unknown; at?: unknown };
+    try {
+      line = JSON.parse(text) as typeof line;
+    } catch {
+      continue;
+    }
+    if ((line.method !== "PAUSE" && line.method !== "RESUME") || typeof line.pathname !== "string" || typeof line.at !== "string") continue;
+    const scope = scopeFromPath(line.pathname);
+    if (!scope) continue;
+    const at = new Date(line.at);
+    if (Number.isNaN(at.getTime())) continue;
+    state = applyPause(state, scope, line.method === "PAUSE", "", at);
+  }
+  return { ...state, revision: 0, resumed: [] };
+}
+
+function scopeFromPath(pathname: string): PauseScope | null {
+  if (pathname === "/all") return { kind: "all" };
+  const [, kind, id] = pathname.split("/");
+  if ((kind === "agent" || kind === "credential") && id && ID.test(id)) return { kind, id };
+  return null;
 }
 
 export function pauseAuditRecord(scope: PauseScope, active: boolean, source: PauseSource, undo: boolean): AuditRecord {
@@ -106,14 +143,19 @@ export interface PauseChangeOptions {
 export async function changePause(options: PauseChangeOptions, request: Pick<PauseRequest, "scope" | "active" | "reason" | "undo">): Promise<PauseChangeResult> {
   const current = await readPauseFile(options.file);
   const before = current.state;
-  // An unreadable file is replaced by a fresh valid one. A resume of everything
-  // then carries its resume record, which is what releases a broker that was
-  // holding the pause. A narrower pause on top of an unreadable file keeps the
-  // broker closed (the file is valid again but "all" is not resumed).
-  const after = applyPause(before, request.scope, request.active, request.reason, options.now);
+  // An unreadable file is replaced by a fresh valid one. While it was
+  // unreadable every broker treated everything as paused, so the repair keeps
+  // everything paused unless this very request is the explicit resume of all;
+  // that resume carries its record, which is what releases a holding broker.
+  const resumingAll = request.scope.kind === "all" && !request.active;
+  let after = applyPause(before, request.scope, request.active, request.reason, options.now);
+  const keepAllPaused = current.unreadable && !resumingAll;
+  if (keepAllPaused) after = applyPause(after, { kind: "all" }, true, "", options.now);
   await writePauseFile(options.file, after);
   if (options.auditFile) {
-    await new AuditLogger(options.auditFile).write(pauseAuditRecord(request.scope, request.active, options.source, request.undo));
+    const audit = new AuditLogger(options.auditFile);
+    await audit.write(pauseAuditRecord(request.scope, request.active, options.source, request.undo));
+    if (keepAllPaused) await audit.write({ ...pauseAuditRecord({ kind: "all" }, true, options.source, false), detail: `${options.source} repair` });
   }
   const changed = request.active ? !wasActive(before, request.scope) : wasActive(before, request.scope) || current.unreadable;
   return { before, after, changed, repaired: current.unreadable };
