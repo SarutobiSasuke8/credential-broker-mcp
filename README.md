@@ -460,6 +460,40 @@ operator verification before a first publish.
 - Not a bypass. It delegates *through* existing gates with scoped-down
   authority; it does not defeat anything.
 
+## How it compares
+
+Other tools solve neighbouring problems. This section names only what was
+read on the projects' own pages on 2026-11-06; it is not a review of their
+security, and they may have moved on since.
+
+- **Hosted secrets managers with an MCP server**, such as
+  [Doppler's](https://docs.doppler.com/docs/mcp). Doppler's server is
+  described as experimental and intended for development and evaluation,
+  calls the Doppler API with an account token kept in the system keyring,
+  and lists "read secret values" among its tools. That is a different
+  shape: the manager hands values to the agent on request and relies on
+  token permissions. This broker never returns a value; the agent gets the
+  result of a scoped call, and nothing leaves the machine.
+- **Governance gateways**, such as
+  [Agenthof](https://github.com/agenthof/agenthof) (Apache-2.0, Go,
+  pre-release). It injects per-role or per-resource credentials the agent
+  never holds, grants access per named tool or resource, and keeps a
+  hash-chained audit ledger attributed to the human who asked. It is a
+  broader control plane with OIDC human identity. This broker is narrower:
+  one process per agent, one YAML file, per-operation method and path
+  grants, no identity provider, no server to run.
+- **Credential-proxy MCP servers** that follow the same "the agent calls
+  through a process that holds the key" pattern exist (for example Janee
+  and pincer-mcp appear in directories). Their pages could not be read for
+  this section, so nothing is claimed about them here.
+
+Where this broker is deliberately small: it brokers static keys you
+already hold, it has no OAuth flows yet, no rate limits beyond key
+requests, and no hosted or multi-user mode. Where it is deliberately
+strict: deny by default per operation, a single decision function for
+explain and execute, secrets redacted in every representation it creates,
+a content-free audit, and operator controls that only ever narrow access.
+
 ## Roadmap
 
 - [ ] OAuth 2.1 device and refresh flows for credentials that expire

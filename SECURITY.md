@@ -1,5 +1,91 @@
 # Security Policy
 
+## Threat model on one page
+
+The broker lets an AI agent use an API key without holding it. This page
+says what that protects, what it does not, and who you still have to trust.
+The detail is in the sections below.
+
+**The attacker the broker is built against** is the agent process on the
+other end of the stdio pipe. It is assumed hostile: it may send any tool
+input, any URL, any header or body it is allowed to supply, as often as it
+likes, and it may be a compromised or prompt-injected model.
+
+**What the broker defends against that attacker**
+
+- It never receives a secret in any representation the broker creates:
+  raw, Base64, base64url, percent-encoded, form-encoded, NFC or NFD, in a
+  body, a header, an error message, a structured result or an audit line.
+- It can only run the operations the policy names for its own identity:
+  fixed method, path template, query parameter allowlist, body rules,
+  response policy. An absent grant is a denial. Deny rules beat grants.
+  Nothing granted for one credential widens another.
+- It cannot choose the upstream host. Every request is canonicalised once
+  and must stay under the credential's base URL; encoded separators,
+  double encoding, backslashes, userinfo, dot segments and control
+  characters are rejected outright.
+- A denied or dry-run request never reaches the upstream and never touches
+  a secret.
+- It cannot see or load another agent's secrets: a process loads only the
+  credentials granted to its own identity and scrubs them from its
+  environment.
+- A state-changing operation the policy marks for approval needs an
+  approval bound to that agent, credential and operation, checked at
+  execution time and revocable mid-flight.
+- The operator can stop it at any moment with the pause switch, which only
+  narrows access and fails closed.
+- Everything it does is audited: who, what, when, outcome. Never content.
+
+**What the broker also defends against: operator accidents**
+
+- A stray click cannot pause or resume everything (typed words).
+- A truncated, half-written or deleted pause file cannot silently reopen
+  access (fail closed, resume records, tamper evidence).
+- An invalid policy during hot reload keeps the previous working state.
+- The key manager never grants write access and no endpoint returns a key.
+
+**What the broker does not defend**
+
+- **Anything running as the broker's OS user.** Such a process can read the
+  keychain, the policy, the audit log and the broker's memory, set
+  `BROKER_AGENT_ID` to any identity, and forge a valid pause file. The
+  typed words and the tamper evidence slow an accident, not an attacker.
+  The only protection here is the secure-launch profile below: a dedicated
+  OS user for the broker, owner-only files, a fixed identity wrapper.
+- **What the upstream does with a permitted call.** The broker limits
+  method, path, query and body. It does not know what `GET /export` means.
+  Grant the smallest operations you can.
+- **An upstream that transforms the secret** before echoing it (hash,
+  encryption, a custom encoding). No redactor can recognise that. Scoped
+  operations and metadata-only responses are the defence.
+- **The upstream's own handling of the key.** Once sent, the key is in the
+  provider's hands. The policy refuses a base URL that is not `https`
+  (plain `http` is allowed on loopback only), and the broker uses TLS as
+  Node provides it, with no certificate pinning.
+- **Volume.** Apart from key requests, there is no rate limit. An agent
+  with a grant can call it as often as the upstream allows.
+- **The browser or machine running the key manager.** The page is loopback
+  only, token gated and under a strict CSP, but a compromised browser
+  profile or desktop can read whatever the operator types.
+- **Side channels** such as timing, response size, or the audit log's
+  existence of a request.
+
+**Who you must trust**
+
+- The operator, and everything that runs as the operator's OS user (unless
+  you run the secure-launch profile, in which case: the broker's user).
+- Whoever can write the policy folder: policy, approvals, pause file, hot
+  reload marker, key notes.
+- The OS keychain: Windows Credential Manager (DPAPI), the macOS login
+  keychain, or the Linux Secret Service.
+- Node.js, the three runtime dependencies (`@modelcontextprotocol/server`,
+  `yaml`, `zod`), and the npm registry with provenance.
+- Each upstream API, to keep the key private after it receives it.
+
+If your situation needs more than this (several untrusted users on one
+machine, a hosted deployment, regulatory separation of duties), this tool
+is not enough on its own.
+
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through GitHub's private
@@ -19,7 +105,7 @@ Security fixes are released as a patch of the latest minor line. Node 22
 and 24 are the supported runtimes. Nothing has been published to npm until
 the `v0.1.0` tag exists; before that, `main` carries no support promise.
 
-## Threat model and trust boundary
+## Trust boundary in detail
 
 The broker separates possession of a secret from use of a secret. The agent
 process on the other end of the stdio pipe is assumed hostile: it may send
