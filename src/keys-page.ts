@@ -180,7 +180,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
 
   <section class="panel primary" id="addPanel">
     <h2>Add a key</h2>
-    <p class="lede">The key goes straight into Windows Credential Manager. Agents can use it through the broker but never see it, and this page never shows it back.</p>
+    <p class="lede">The key goes straight into <span class="kcName">the OS keychain</span>. Agents can use it through the broker but never see it, and this page never shows it back.</p>
     <form id="add" class="grid" autocomplete="off">
       <label>Short name
         <input name="id" placeholder="openai" required pattern="[a-z0-9][a-z0-9._-]{1,63}">
@@ -209,7 +209,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
       </label>
       <label class="full">API key
         <input name="value" type="password" placeholder="Paste the key" spellcheck="false">
-        <span class="hint">Stored in Windows Credential Manager under credential-broker/&lt;short name&gt;.</span>
+        <span class="hint">Stored in <span class="kcName">the OS keychain</span> under credential-broker/&lt;short name&gt;.</span>
       </label>
       <div class="field">Expires
         <input name="expires" type="date">
@@ -288,7 +288,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
 
   <details class="panel" id="connect">
     <summary>Connect to Claude Code</summary>
-    <p class="hint">Run once per agent identity. The broker reads keys from Credential Manager at start-up, so nothing secret goes in this command.</p>
+    <p class="hint">Run once per agent identity. The broker reads keys from the keychain at start-up, so nothing secret goes in this command.</p>
     <label class="hint">Agent <select id="connectAgent"></select></label>
     <pre id="connectCmd"></pre>
     <button id="copyCmd">Copy</button>
@@ -718,7 +718,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
       document.getElementById("addPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     });
     remove.addEventListener("click", function () {
-      if (!confirm("Remove the stored key " + k.id + " from Credential Manager?")) return;
+      if (!confirm("Remove the stored key " + k.id + " from the keychain?")) return;
       busy(remove, function () {
         return api("/api/secret/delete", { credentialId: k.id })
           .then(function () { return refresh(); })
@@ -888,6 +888,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
   function render() {
     var where = document.getElementById("where");
     where.textContent = state.policyFile + (state.keychain ? " · keys in " + state.keychain : "");
+    Array.from(document.querySelectorAll(".kcName")).forEach(function (n) { n.textContent = state.keychain || "the OS keychain"; });
 
     var banner = document.getElementById("banner");
     banner.replaceChildren();
@@ -912,7 +913,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     storedOnly.replaceChildren();
     if (state.storedOnly.length) {
       storedOnly.appendChild(el("h3", { text: "Stored only (" + state.storedOnly.length + ")" }));
-      storedOnly.appendChild(el("p", { className: "hint", text: "Housed in Credential Manager but not connected to an API, so no agent can use them. To connect one, use Connect to an API, then add the base URL above and leave the key field empty." }));
+      storedOnly.appendChild(el("p", { className: "hint", text: "Housed in the keychain but not connected to an API, so no agent can use them. To connect one, use Connect to an API, then add the base URL above and leave the key field empty." }));
       state.storedOnly.forEach(function (k) { storedOnly.appendChild(renderStoredOnly(k)); });
     }
 

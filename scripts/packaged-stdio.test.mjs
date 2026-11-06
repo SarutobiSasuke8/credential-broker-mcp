@@ -166,6 +166,8 @@ agents:
     BROKER_AGENT_ID: "proof-reader", BROKER_POLICY_FILE: policyFile,
     BROKER_AUDIT_FILE: auditFile, BROKER_APPROVALS_FILE: approvalsFile,
     BROKER_PROOF_SECRET: secret, BROKER_PROOF_FOREIGN: foreignSecret,
+    // The proof never touches a real keychain on any platform.
+    BROKER_KEYCHAIN: "off",
   });
 
   await t.test("missing and unknown launcher identities fail closed", async () => {

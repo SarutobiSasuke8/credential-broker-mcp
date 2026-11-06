@@ -202,7 +202,7 @@ async function buildState(): Promise<object> {
     policyFile,
     policyExists: exists,
     policyError: error,
-    keychain: store ? "Windows Credential Manager" : null,
+    keychain: store ? store.name : null,
     maxSecretBytes: MAX_SECRET_BYTES,
     credentials,
     // Keys housed in the keychain that no API in the policy uses yet.
@@ -519,7 +519,7 @@ async function applyImport(body: unknown): Promise<object> {
       continue;
     }
     if (Buffer.byteLength(row.value, "utf8") > MAX_SECRET_BYTES) {
-      results.push({ rowId: item.rowId, id: item.id, ok: false, message: `Too long for Credential Manager (over ${MAX_SECRET_BYTES} bytes).` });
+      results.push({ rowId: item.rowId, id: item.id, ok: false, message: `Too long for the keychain (over ${MAX_SECRET_BYTES} bytes).` });
       continue;
     }
     let nextText = text;
@@ -769,7 +769,7 @@ server.listen(requestedPort, "127.0.0.1", () => {
   const url = `http://127.0.0.1:${port}/#${token}${prefill ? `.${prefill}` : ""}`;
   console.log("Credential Broker key manager");
   console.log(`Policy: ${policyFile}`);
-  console.log(`Keys:   ${store ? "Windows Credential Manager" : "no keychain on this platform; use env vars"}`);
+  console.log(`Keys:   ${store ? store.name : "no keychain on this platform; use env vars"}`);
   console.log(`\nOpen:   ${url}\n`);
   console.log("Press Ctrl+C to stop. Closes itself after 30 minutes idle.");
   touch();

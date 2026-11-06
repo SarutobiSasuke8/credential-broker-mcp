@@ -19,8 +19,10 @@ the defence there, and SECURITY.md states this boundary honestly.
 
 ## Five-minute quickstart
 
-Needs Node 22 or 24. Key storage is Windows Credential Manager today; on
-macOS and Linux set each credential's `env_var` instead (see the roadmap).
+Needs Node 22 or 24. Keys are stored in the OS keychain: Windows Credential
+Manager, the macOS login keychain, or the Secret Service on Linux
+(GNOME Keyring or KWallet through `secret-tool`). Without one, set each
+credential's `env_var` instead.
 
 1. **Pick a folder for your policy** and open the key manager. It prints a
    link and opens it in your browser.
@@ -223,7 +225,7 @@ principal's secrets and scrubs every policy credential variable from its
 environment after loading. One broker process serves one principal; never
 share a process between agents.
 
-## Managing keys (Windows)
+## Managing keys
 
 ```bash
 npm install
@@ -233,8 +235,8 @@ npm run keys
 This opens a local page in your browser where you:
 
 - **Add an API**: name, base URL, how the key is sent, paste the key, then
-  choose individual agents or group shortcuts. The key goes into Windows
-  Credential Manager; the policy file gets persistent group assignments and
+  choose individual agents or group shortcuts. The key goes into the OS
+  keychain; the policy file gets persistent group assignments and
   separate read-only grants for individually selected agents (GET on any path under the
   base URL, only the query parameters you list).
 - **Save, replace, test, or remove a key** for any API already in the
@@ -267,8 +269,15 @@ Membership alone grants nothing; a matching `group_grants:` entry is required.
 Group and direct denials are combined, and group mutations must require
 approval. The key cards show groups actually assigned to each credential.
 
-Keys live in Control Panel > Credential Manager > Windows Credentials as
-`credential-broker/<credential-id>`. An `env_var` value, if set, overrides
+Keys live in the OS keychain as `credential-broker/<credential-id>`: on
+Windows in Control Panel > Credential Manager > Windows Credentials, on
+macOS in the login keychain (Keychain Access shows them under that
+service name), on Linux in the Secret Service (Seahorse or KWallet
+Manager shows them with the `credential-broker` attribute). The macOS and
+Linux backends drive the `security` and `secret-tool` commands and send
+the key over stdin, never on a command line; they are unit tested against
+a fake and still need a real round trip on each platform before you rely
+on them. An `env_var` value, if set, overrides
 the stored key. The page listens on 127.0.0.1 only, needs a per-run token
 from the printed link, and closes after 30 minutes idle. On other
 platforms, set each credential's `env_var` instead.
@@ -458,8 +467,10 @@ operator verification before a first publish.
   expiring principal tokens through the same engine, matching
   [agent-handoff-mcp](https://github.com/SarutobiSasuke8/agent-handoff-mcp)
 - [ ] Per-credential rate limits and spend counters
-- [x] Key manager page: provision, replace, test, and remove keys (Windows)
-- [ ] Keychain backends for macOS and Linux
+- [x] Key manager page: provision, replace, test, and remove keys
+- [x] Keychain backends for macOS (`security`) and Linux (`secret-tool`),
+  unit tested with a faked command runner; real round trips on a Mac and a
+  Linux desktop are still to be confirmed by hand
 - [ ] Operator CLI: approve, rotate
 
 ## Licence
