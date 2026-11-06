@@ -3,10 +3,12 @@ import { z } from "zod";
 
 import { BrokerEngine } from "./engine.js";
 import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
+import { handleKeyRequest, keyRequestInputSchema } from "./key-request.js";
 
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { AuditSink } from "./audit.js";
 import type { ApprovalStore, Clock, SecretProvider } from "./engine.js";
+import type { KeyRequester } from "./key-request.js";
 import type { BrokerPolicy } from "./types.js";
 
 export interface BrokerServices {
@@ -16,7 +18,21 @@ export interface BrokerServices {
   approvals?: ApprovalStore;
   clock?: Clock;
   fetchImpl?: typeof fetch;
+  /** When present, registers broker_request_credential. Off unless the operator opts in. */
+  keyRequests?: KeyRequester;
 }
+
+/**
+ * Annotations for the opt-in key request tool. It is not in TOOL_CONTRACTS
+ * because it never touches an upstream: it opens a window for the operator.
+ * It is honestly not read-only (it starts a process) and not destructive.
+ */
+export const KEY_REQUEST_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
 
 function jsonResult(value: Record<string, unknown>): CallToolResult {
   return {
@@ -254,6 +270,50 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
         ...(idempotency_key !== undefined ? { idempotencyKey: idempotency_key } : {}),
       }),
   );
+
+  if (services.keyRequests) {
+    const requester = services.keyRequests;
+    server.registerTool(
+      "broker_request_credential",
+      {
+        title: "Ask the user to add a key",
+        description:
+          "Ask the user to add an API key. This opens the key manager on the user's computer, pre-filled with " +
+          "the name and your reason. You never see the key, the page address or what the user decides. " +
+          "Use it only when a task needs an API this agent has no credential for, say why in 'reason', and " +
+          "name a known 'provider' (for example github, openai, itch) so the address is filled in from the broker's own table. " +
+          "Requests are rate limited. A new key takes effect after the MCP client is restarted.",
+        inputSchema: keyRequestInputSchema,
+        annotations: KEY_REQUEST_TOOL_ANNOTATIONS,
+      },
+      async (input) => {
+        try {
+          const result = await handleKeyRequest(
+            {
+              requester,
+              agentId,
+              isProvisioned: (id) => policy.credentials.has(id) && services.secrets.getSecret(id) !== undefined,
+              recordAudit: (credentialId, detail) =>
+                services.audit.write({
+                  traceId: `key-request-${Date.now().toString(36)}`,
+                  agentId,
+                  credentialId,
+                  method: "REQUEST_KEY",
+                  host: "key-manager.local",
+                  pathname: "/",
+                  outcome: "requested",
+                  detail,
+                }),
+            },
+            input,
+          );
+          return result.isError ? errorResult(JSON.stringify(result.payload)) : jsonResult(result.payload);
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : "Invalid key request.");
+        }
+      },
+    );
+  }
 
   return server;
 }

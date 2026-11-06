@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { AuditLogger } from "./audit.js";
 import { FileApprovalStore, loadPrincipalSecrets } from "./engine.js";
+import { KeyRequester, spawnKeyManagerLauncher } from "./key-request.js";
 import { platformSecretStore } from "./keychain.js";
 import { loadBrokerPolicy } from "./policy.js";
 import { createBrokerMcpServer } from "./server.js";
@@ -43,6 +44,9 @@ const mcpServer = createBrokerMcpServer(
     audit: new AuditLogger(auditFile),
     secrets,
     approvals: new FileApprovalStore(approvalsFile),
+    // Opt-in per process: lets this agent ask the operator for a key by
+    // opening the key manager. Off unless the operator sets the variable.
+    ...(process.env.BROKER_ALLOW_KEY_REQUESTS === "1" ? { keyRequests: new KeyRequester({ launcher: spawnKeyManagerLauncher() }) } : {}),
   },
   agentId,
 );
