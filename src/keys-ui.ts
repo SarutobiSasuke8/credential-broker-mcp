@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
@@ -18,7 +18,7 @@ import { changePause, confirmationMatches, pauseRequestSchema, readPauseFile } f
 import { reloadMarkerPath, touchReloadMarker } from "./reload.js";
 import { readAuditLines, summarizeUsage, USAGE_WINDOW_DAYS } from "./usage.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
-import { renderKeysPage } from "./keys-page.js";
+import { listPresets } from "./import-scan.js";
 import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
 import { parseBrokerPolicy } from "./policy.js";
 
@@ -40,6 +40,25 @@ import type { BrokerPolicy, CredentialSpec } from "./types.js";
  */
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const uiRoot = join(packageRoot, "dist", "ui");
+
+/**
+ * The page is three static files built from src/ui (HTML, CSS, JS) and read
+ * once at start-up. They are served by this process only, on loopback, under
+ * the same CSP: the page never loads anything from anywhere else.
+ */
+const UI_FILES = {
+  html: readFileSync(join(uiRoot, "index.html"), "utf8"),
+  css: readFileSync(join(uiRoot, "app.css"), "utf8"),
+  app: readFileSync(join(uiRoot, "app.js"), "utf8"),
+  logic: readFileSync(join(uiRoot, "logic.js"), "utf8"),
+};
+const packageVersion = String((JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version?: unknown }).version ?? "");
+
+/** Fills the per-request nonce into the shell. split/join, so nothing in the page is treated as a pattern. */
+function renderPage(nonce: string): string {
+  return UI_FILES.html.split("__NONCE__").join(nonce);
+}
 const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(packageRoot, "config", "broker.yaml"));
 const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(packageRoot, "data", "audit.jsonl"));
 const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(packageRoot, "config", "approvals.json"));
@@ -238,7 +257,52 @@ async function buildState(): Promise<object> {
       auditFile,
       approvalsFile,
     },
+    paths: { policyFile, auditFile, approvalsFile, pauseFile, keyNotesFile, reloadMarker },
+    version: packageVersion,
+    platform: process.platform,
+    // Known providers for the New key picker. A fixed table; never agent-supplied.
+    providers: listPresets().map((p) => ({
+      id: p.id,
+      label: p.label,
+      baseUrl: p.baseUrl,
+      kind: p.kind,
+      paramName: p.paramName ?? null,
+      testPath: p.testPath ?? null,
+      keysUrl: findPresetByOrigin(p.baseUrl)?.keysUrl ?? null,
+    })),
   };
+}
+
+const MAX_ACTIVITY_RECORDS = 2000;
+
+/**
+ * Recent audit records for the Activity page. The audit is content-free by
+ * design; only these fixed fields are ever sent, so nothing an upstream or an
+ * agent wrote can reach the page from here.
+ */
+async function recentActivity(): Promise<object> {
+  const records: object[] = [];
+  for (const text of await readAuditLines(auditFile)) {
+    if (!text.trim()) continue;
+    let line: Record<string, unknown>;
+    try {
+      line = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const str = (k: string): string => (typeof line[k] === "string" ? (line[k] as string) : "");
+    records.push({
+      at: str("at"),
+      agentId: str("agentId"),
+      credentialId: str("credentialId"),
+      method: str("method"),
+      host: str("host"),
+      pathname: str("pathname"),
+      outcome: str("outcome"),
+      status: typeof line["status"] === "number" ? line["status"] : null,
+    });
+  }
+  return { records: records.slice(-MAX_ACTIVITY_RECORDS).reverse() };
 }
 
 /** Pasted keys often carry a trailing newline or a copied "Bearer " prefix. */
@@ -659,6 +723,7 @@ const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/credential": addCredential,
   "POST /api/test": testCredential,
   "POST /api/state": () => buildState(),
+  "POST /api/activity": () => recentActivity(),
   "POST /api/import/scan": scanImport,
   "POST /api/import/apply": applyImport,
 };
@@ -709,7 +774,15 @@ const server = createServer((req, res) => {
 
     if (req.method === "GET" && path === "/") {
       const nonce = randomBytes(16).toString("base64");
-      send(res, 200, "text/html; charset=utf-8", renderKeysPage(nonce), nonce);
+      send(res, 200, "text/html; charset=utf-8", renderPage(nonce), nonce);
+      return;
+    }
+    if (req.method === "GET" && path === "/ui/app.css") {
+      send(res, 200, "text/css; charset=utf-8", UI_FILES.css);
+      return;
+    }
+    if (req.method === "GET" && (path === "/ui/app.js" || path === "/ui/logic.js")) {
+      send(res, 200, "text/javascript; charset=utf-8", path === "/ui/app.js" ? UI_FILES.app : UI_FILES.logic);
       return;
     }
     if (req.method === "POST" && path === "/api/close") {

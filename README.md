@@ -252,7 +252,14 @@ This opens a local page in your browser where you:
   read by the key manager process and never sent to the page. Wallet keys
   are flagged and never offered as APIs. Original copies are not touched.
 - **Copy the `claude mcp add` command** that registers the broker for an
-  agent with absolute paths filled in.
+  agent with absolute paths filled in (Settings page).
+
+The page is a small site: a sticky header with search (`/` or `Ctrl+K`),
+a **New key** button, the pause control and a status chip, and pages for
+Overview, Keys, Agents, Approvals, Activity (the content-free audit log,
+with filters and CSV export), Import and Settings. It follows your system's
+light or dark theme, works with the keyboard alone, and is served entirely
+by the key manager on loopback: no external script, style, font or image.
 
 Write access (POST, PUT, PATCH, DELETE) is never granted from the page;
 add those operations to the policy by hand. Restart the MCP client (or set `BROKER_HOT_RELOAD=1`, see below) after
