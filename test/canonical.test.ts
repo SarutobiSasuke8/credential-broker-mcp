@@ -149,3 +149,13 @@ void test("path templates parse and match segment-wise", () => {
   assert.ok(!matchPathTemplate(["admin"], ["Admin"]));
   assert.ok(matchPathTemplate(["admin"], ["Admin"], { caseInsensitive: true }));
 });
+
+void test("a dot segment hidden behind a path parameter is rejected", () => {
+  for (const url of ["https://h/user/..;/admin/x", "https://h/user/.;x/admin", "https://h/a/..;b", "https://h/%2e%2e;/x"]) {
+    const out = canonicalizeRequestUrl(url);
+    assert.equal(out.ok, false, url);
+    assert.match(out.ok ? "" : out.reason, /dot segment/u, url);
+  }
+  const fine = canonicalizeRequestUrl("https://h/a/b;jsessionid=1/c");
+  assert.equal(fine.ok, true, "ordinary path parameters stay allowed");
+});

@@ -1,6 +1,9 @@
 import { canonicalizeRequestUrl, matchPathTemplate } from "./canonical.js";
 import { effectiveGrant } from "./grants.js";
 
+/** type/subtype with optional parameters; printable ASCII only, so no header injection. */
+const MEDIA_TYPE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+(?:;[ -~]*)?$/u;
+
 import type { CanonicalRequest } from "./canonical.js";
 import type {
   AgentGrant,
@@ -17,6 +20,7 @@ export interface EvaluationInput {
   url: string;
   /** Raw body string when present; undefined means no body is sent. */
   body?: string;
+  /** A media type, e.g. application/json; parameters allowed, controls not. */
   contentType?: string;
 }
 
@@ -137,6 +141,18 @@ export function evaluate(
     if (offending) {
       queryFailure = { operation, param: offending[0] };
       continue;
+    }
+    // A content type is only ever a media type, with or without a body.
+    if (input.contentType !== undefined && !MEDIA_TYPE.test(input.contentType)) {
+      return {
+        allowed: false,
+        reason: "Content type must be a media type such as application/json, with printable parameters only.",
+        decidingRule: { source: "body-not-allowed", pattern: operation.id },
+        agent,
+        credential,
+        grant,
+        canonical: request,
+      };
     }
     // Body rules.
     if (input.body !== undefined) {

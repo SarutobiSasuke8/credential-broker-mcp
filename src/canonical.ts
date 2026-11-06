@@ -76,6 +76,12 @@ function decodeSegment(rawSegment: string): { ok: true; value: string } | { ok: 
   if (decoded === "." || decoded === "..") {
     return { ok: false, reason: "dot segment survived normalisation" };
   }
+  // Servlet containers strip ";param" before they normalise, so "..;x" is
+  // ".." to them while it is an ordinary segment to the WHATWG parser.
+  const beforeParams = decoded.split(";")[0] ?? "";
+  if (beforeParams === "." || beforeParams === "..") {
+    return { ok: false, reason: "dot segment hidden behind a path parameter" };
+  }
   if (decoded.endsWith(".")) {
     return { ok: false, reason: "path segment with a trailing dot (ambiguous on some upstreams)" };
   }

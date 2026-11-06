@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
+import type { BrokerPolicy } from "./types.js";
+
 /**
  * Hot reload without a restart. The key manager writes a small marker file
  * after every change it makes (policy, key, import). A running broker that has
@@ -31,6 +33,20 @@ async function readMarker(file: string): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * The policy to run when a reload finds the broker's own identity gone: the
+ * same policy with that identity present but disabled and holding no grants,
+ * so every request is denied until the operator restores it or restarts. The
+ * previous grants must not stay live just because the new file left us out.
+ */
+export function revokedIdentityPolicy(next: BrokerPolicy, previous: BrokerPolicy, agentId: string): BrokerPolicy {
+  const was = previous.agents.get(agentId);
+  if (!was) return next;
+  const agents = new Map(next.agents);
+  agents.set(agentId, { ...was, enabled: false, grants: new Map() });
+  return { ...next, agents };
 }
 
 export interface ReloadWatcherOptions<T> {
