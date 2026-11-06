@@ -27,6 +27,19 @@ function reloadRecord(agent: string, detail: string): AuditRecord {
   };
 }
 
+function pauseTamperRecord(agent: string, detail: string): AuditRecord {
+  return {
+    traceId: `pause-file-${Date.now().toString(36)}`,
+    agentId: agent,
+    credentialId: "-",
+    method: "PAUSE_TAMPER",
+    host: "broker.local",
+    pathname: "/pause",
+    outcome: "denied",
+    detail,
+  };
+}
+
 /**
  * Stdio transport. The identity here is a trusted-launcher assertion: the
  * operator who sets BROKER_AGENT_ID vouches for the process on the other end
@@ -89,7 +102,7 @@ const mcpServer = createBrokerMcpServer(
     secrets,
     approvals: new FileApprovalStore(approvalsFile),
     // Always on: a missing pause file means nothing is paused.
-    pause: new FilePauseGuard(pauseFilePath(policyFile)),
+    pause: new FilePauseGuard(pauseFilePath(policyFile), (event) => audit.write(pauseTamperRecord(agentId, event.detail))),
     ...(refresh ? { refresh } : {}),
     // Opt-in per process: lets this agent ask the operator for a key by
     // opening the key manager. Off unless the operator sets the variable.

@@ -13,7 +13,8 @@ import { findPresetById, findPresetByOrigin, scanForKeys } from "./import-scan.j
 import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
 import { approvalState, createApproval, parseApprovals, pruneApprovals, revokeApproval, serializeApprovals } from "./approvals-admin.js";
 import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, markRotated, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
-import { anyPauseActive, applyPause, EMPTY_PAUSE, MAX_PAUSE_REASON, parsePauseState, pauseFilePath, serializePauseState } from "./kill-switch.js";
+import { anyPauseActive, pauseFilePath } from "./kill-switch.js";
+import { changePause, confirmationMatches, pauseRequestSchema, readPauseFile } from "./pause-admin.js";
 import { reloadMarkerPath, touchReloadMarker } from "./reload.js";
 import { readAuditLines, summarizeUsage, USAGE_WINDOW_DAYS } from "./usage.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
@@ -126,9 +127,7 @@ async function writePolicy(text: string): Promise<void> {
 }
 
 async function readPause() {
-  if (!existsSync(pauseFile)) return { state: EMPTY_PAUSE, unreadable: false };
-  const parsed = parsePauseState(await readFile(pauseFile, "utf8").catch(() => ""));
-  return parsed.ok ? { state: parsed.state, unreadable: false } : { state: EMPTY_PAUSE, unreadable: true };
+  return readPauseFile(pauseFile);
 }
 
 async function writeAtomic(file: string, text: string): Promise<void> {
@@ -303,20 +302,15 @@ async function deleteSecret(body: unknown): Promise<object> {
   return { ok: true, removed };
 }
 
-const pauseSchema = z.object({
-  scope: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("all") }),
-    z.object({ kind: z.literal("agent"), id: ID }),
-    z.object({ kind: z.literal("credential"), id: ID }),
-  ]),
-  active: z.boolean(),
-  reason: z.string().max(MAX_PAUSE_REASON).default(""),
-});
-
 async function setPause(body: unknown): Promise<object> {
-  const input = pauseSchema.parse(body);
-  const { state } = await readPause();
-  await writeAtomic(pauseFile, serializePauseState(applyPause(state, input.scope, input.active, input.reason)));
+  const input = pauseRequestSchema.parse(body);
+  // The global switch needs the typed word. This guards against a stray click in
+  // the page. It is not a security boundary: anyone holding the session token
+  // can send it, and so can anyone who can write the pause file.
+  if (input.scope.kind === "all" && !confirmationMatches(input.confirm, input.active)) {
+    throw new HttpError(400, input.active ? "Type PAUSE to confirm." : "Type RESUME to confirm.");
+  }
+  await changePause({ file: pauseFile, auditFile, source: "page" }, input);
   return { ok: true };
 }
 

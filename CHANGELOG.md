@@ -10,6 +10,13 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Pause safeguards. Pausing everything asks you to type `PAUSE` and resuming
+  everything asks for `RESUME`; pausing one agent or key confirms and offers an
+  eight second Undo; resuming one confirms. Every pause and resume, from the
+  page or `npm run pause`, writes a content-free audit line. Resuming never
+  deletes `pause.json`, and a running broker that sees an active pause vanish
+  without a resume record stays paused and audits `PAUSE_TAMPER`. The terminal
+  command stays immediate, accepts `--yes`, and prints exactly what changed.
 - Panic button: a pause switch (`pause.json`) checked before every request, for
   everything, one agent or one key. One click in the key manager, or
   `npm run pause`. Fails closed (an unreadable file pauses everything), needs no

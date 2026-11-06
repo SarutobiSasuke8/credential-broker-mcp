@@ -259,12 +259,21 @@ the name and the reason, with a banner saying which agent asked.
 
 ### Panic button
 
-The header of the key manager has a red **Pause all access** button. One click
-makes every broker refuse every request on its next call. Nothing is deleted:
-policy, keys and approvals stay as they were, and **Resume** restores access.
-You can also pause one agent (Agents panel) or one key (its card).
+The header of the key manager has a red **Pause all access** button. It opens a
+dialog that says what will happen, shows how many agents and keys are affected,
+and asks you to type `PAUSE`. From then on every broker refuses every request on
+its next call. Nothing is deleted: policy, keys and approvals stay as they were.
+**Resume all access** asks you to type `RESUME`, because resuming is the risky
+direction. Pausing one agent (Agents panel) or one key (its card) asks a plain
+confirmation and then offers an eight second **Undo**; resuming one asks a
+confirmation.
 
-From a terminal, when no browser is to hand:
+The typed word is a safeguard against a stray click in the page. It is not a
+security boundary: anyone who can write the policy directory can pause or
+resume, which is the same trust as editing the policy.
+
+From a terminal, when no browser is to hand, the command acts at once with no
+prompt, and prints exactly what it changed:
 
 ```bash
 npm run pause -- on --reason "key leaked"            # everything
@@ -274,11 +283,28 @@ npm run pause -- off                                 # resume everything
 npm run pause -- status                              # exit code 1 while anything is paused
 ```
 
+`--yes` is accepted so a script can say plainly that it means it; it changes
+nothing.
+
 The switch is the file `pause.json` beside the policy (override with
 `BROKER_PAUSE_FILE`). Brokers re-read it on every request, so it needs no
 restart, and it fails closed: a missing file means nothing is paused, but a file
 that exists and cannot be read pauses everything. Agents are told only that
 access is paused and not to retry; your typed reason stays private.
+
+Every pause and resume, from the page or the terminal, appends one line to the
+audit log: the scope, the direction, where it came from and when. The reason is
+never written there.
+
+**Tamper evidence.** Resuming never deletes `pause.json`; it writes a fresh
+file with an explicit resume record. A running broker remembers the last pause
+it enforced, so if that pause disappears (the file is deleted, emptied or
+replaced) without a matching resume record, the broker stays paused and writes
+a `PAUSE_TAMPER` audit line. Only a valid file carrying the resume releases it:
+run `npm run pause -- off`, or pause and resume once from the page. This catches
+accidents and casual meddling. A hostile process running as the same OS user
+can still write a valid file; the real protection against that is the
+secure-launch profile in [SECURITY.md](SECURITY.md).
 
 ### Hot reload
 

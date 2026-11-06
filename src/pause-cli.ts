@@ -1,28 +1,31 @@
 #!/usr/bin/env node
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { changePause, describeScope, describeState, readPauseFile } from "./pause-admin.js";
+import { anyPauseActive, pauseFilePath } from "./kill-switch.js";
 
-import { anyPauseActive, applyPause, EMPTY_PAUSE, parsePauseState, pauseFilePath, serializePauseState } from "./kill-switch.js";
-
-import type { PauseScope, PauseState } from "./kill-switch.js";
+import type { PauseScope } from "./kill-switch.js";
 
 /**
  * Terminal version of the panic button, for when a browser is not to hand.
  *
- *   credential-broker-pause on  [--agent id | --credential id] [--reason "text"]
- *   credential-broker-pause off [--agent id | --credential id]
+ *   credential-broker-pause on  [--agent id | --credential id] [--reason "text"] [--yes]
+ *   credential-broker-pause off [--agent id | --credential id] [--yes]
  *   credential-broker-pause status
  *
- * With no scope it pauses or resumes everything. It writes the same pause file
- * the key manager does, which every broker re-reads on each request.
+ * With no scope it pauses or resumes everything. It acts at once and never
+ * asks: in an emergency a prompt is a delay. It prints exactly what it changed,
+ * writes the same pause file the key manager does (which every broker re-reads
+ * on each request), and appends one content-free line to the audit log.
+ * --yes is accepted so a script can say plainly that it means it; it changes
+ * nothing. The file is never deleted: resuming writes an explicit record.
  */
 
 const ID = /^[a-z0-9][a-z0-9._-]{1,63}$/u;
 const policyFile = process.env.BROKER_POLICY_FILE ?? "config/broker.yaml";
+const auditFile = process.env.BROKER_AUDIT_FILE ?? "data/audit.jsonl";
 const file = pauseFilePath(policyFile);
 
 function usage(): never {
-  console.error('Usage: credential-broker-pause on|off|status [--agent id | --credential id] [--reason "text"]');
+  console.error('Usage: credential-broker-pause on|off|status [--agent id | --credential id] [--reason "text"] [--yes]');
   process.exit(2);
 }
 
@@ -31,35 +34,15 @@ function argValue(args: string[], flag: string): string | undefined {
   return at === -1 ? undefined : args[at + 1];
 }
 
-async function load(): Promise<{ state: PauseState; unreadable: boolean }> {
-  let text: string;
-  try {
-    text = await readFile(file, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { state: EMPTY_PAUSE, unreadable: false };
-    return { state: EMPTY_PAUSE, unreadable: true };
-  }
-  const parsed = parsePauseState(text);
-  return parsed.ok ? { state: parsed.state, unreadable: false } : { state: EMPTY_PAUSE, unreadable: true };
-}
-
-function describe(state: PauseState): string[] {
-  const lines: string[] = [];
-  if (state.all) lines.push(`ALL agent access is paused since ${state.all.at}${state.all.reason ? `: ${state.all.reason}` : ""}`);
-  for (const [id, entry] of Object.entries(state.agents)) lines.push(`Agent ${id} paused since ${entry.at}${entry.reason ? `: ${entry.reason}` : ""}`);
-  for (const [id, entry] of Object.entries(state.credentials)) lines.push(`Credential ${id} paused since ${entry.at}${entry.reason ? `: ${entry.reason}` : ""}`);
-  return lines.length ? lines : ["Nothing is paused."];
-}
-
 const args = process.argv.slice(2);
 const command = args[0];
 if (command !== "on" && command !== "off" && command !== "status") usage();
 
-const { state, unreadable } = await load();
+const current = await readPauseFile(file);
 if (command === "status") {
-  if (unreadable) console.log("The pause file exists but cannot be read, so brokers treat everything as paused. Run 'off' to reset it.");
-  for (const line of describe(state)) console.log(line);
-  process.exit(anyPauseActive(state) || unreadable ? 1 : 0);
+  if (current.unreadable) console.log("The pause file exists but cannot be read, so brokers treat everything as paused. Run 'off' to reset it.");
+  for (const line of describeState(current.state)) console.log(line);
+  process.exit(anyPauseActive(current.state) || current.unreadable ? 1 : 0);
 }
 
 const agent = argValue(args, "--agent");
@@ -70,10 +53,12 @@ if ((agent && !ID.test(agent)) || (credential && !ID.test(credential))) {
   process.exit(2);
 }
 const scope: PauseScope = agent ? { kind: "agent", id: agent } : credential ? { kind: "credential", id: credential } : { kind: "all" };
-const next = applyPause(state, scope, command === "on", argValue(args, "--reason") ?? "");
+const active = command === "on";
 
-await mkdir(dirname(file), { recursive: true });
-const temp = `${file}.tmp-${process.pid}`;
-await writeFile(temp, serializePauseState(next), { encoding: "utf8", mode: 0o600 });
-await rename(temp, file);
-for (const line of describe(next)) console.log(line);
+const result = await changePause({ file, auditFile, source: "cli" }, { scope, active, reason: argValue(args, "--reason") ?? "", undo: false });
+const what = describeScope(scope);
+if (result.changed) console.log(`Changed: ${what} is now ${active ? "PAUSED" : "resumed"}.`);
+else console.log(`No change: ${what} was already ${active ? "paused" : "running"}.`);
+if (result.repaired) console.log("The pause file could not be read before, so it was rewritten from a clean state.");
+for (const line of describeState(result.after)) console.log(line);
+console.log(`Pause file: ${file}`);
