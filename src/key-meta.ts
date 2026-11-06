@@ -23,6 +23,8 @@ const entrySchema = z.object({
   expires: z.string().refine(isRealDate, "Use a real date as YYYY-MM-DD.").nullable().default(null),
   note: z.string().max(MAX_NOTE_LENGTH).default(""),
   updatedAt: z.string().default(""),
+  /** When the key was last replaced through the key manager. */
+  rotatedAt: z.string().nullable().default(null),
 });
 
 const fileSchema = z.object({
@@ -62,9 +64,19 @@ export function applyMetaUpdate(file: KeyMetaFile, id: string, update: MetaUpdat
   const note = update.note.trim();
   if (note.length > MAX_NOTE_LENGTH) throw new Error(`Keep notes under ${MAX_NOTE_LENGTH} characters.`);
   const keys = { ...file.keys };
-  if (expires === null && note === "") delete keys[id];
-  else keys[id] = { expires, note, updatedAt: now.toISOString() };
+  const rotatedAt = keys[id]?.rotatedAt ?? null;
+  if (expires === null && note === "" && rotatedAt === null) delete keys[id];
+  else keys[id] = { expires, note, updatedAt: now.toISOString(), rotatedAt };
   return { version: 1, keys };
+}
+
+/** Records that a key was just replaced. Keeps any expiry and note already set. */
+export function markRotated(file: KeyMetaFile, id: string, now: Date = new Date()): KeyMetaFile {
+  const current = file.keys[id];
+  return {
+    version: 1,
+    keys: { ...file.keys, [id]: { expires: current?.expires ?? null, note: current?.note ?? "", updatedAt: now.toISOString(), rotatedAt: now.toISOString() } },
+  };
 }
 
 export type ExpiryState = "none" | "ok" | "soon" | "expired";

@@ -9,6 +9,7 @@ import { SecretRedactor } from "./redact.js";
 import { isMutationMethod } from "./types.js";
 
 import type { AuditSink } from "./audit.js";
+import type { PauseGuard } from "./kill-switch.js";
 import type { BrokerPolicy, CredentialSpec, OperationGrant } from "./types.js";
 
 /**
@@ -262,11 +263,15 @@ export interface EngineOptions {
   secrets: SecretProvider;
   audit: AuditSink;
   approvals?: ApprovalStore;
+  /** Operator pause switch, checked before every request. Absent means never paused. */
+  pause?: PauseGuard;
   clock?: Clock;
   fetchImpl?: typeof fetch;
   /** Upstream timeout in milliseconds. */
   timeoutMs?: number;
 }
+
+const PAUSED_MESSAGE = "Access is paused by the operator. Do not retry. Tell the user and wait for them to resume it.";
 
 /** Response headers that are safe to relay. Everything else is dropped. */
 const SAFE_RESPONSE_HEADERS = ["content-type", "content-length", "retry-after", "x-ratelimit-remaining"];
@@ -281,6 +286,7 @@ export class BrokerEngine {
   private readonly secrets: SecretProvider;
   private readonly audit: AuditSink;
   private readonly approvals: ApprovalStore | undefined;
+  private readonly pause: PauseGuard | undefined;
   private readonly clock: Clock;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
@@ -294,6 +300,7 @@ export class BrokerEngine {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.approvals = options.approvals;
+    this.pause = options.pause;
     this.redactor = new SecretRedactor(options.secrets.listSecretValues());
     // Every audit record passes through the redactor, whatever sink is used.
     this.audit = new RedactingAuditSink(options.audit, this.redactor);
@@ -309,6 +316,10 @@ export class BrokerEngine {
   /** Content-free preflight: decision plus approval requirement, no secret
    * acquisition, no upstream contact. */
   public async explain(request: EngineRequest): Promise<ExplainResult> {
+    const pauseCheck = await this.pause?.check(this.principalId, request.credentialId);
+    if (pauseCheck?.paused) {
+      return { allowed: false, reason: PAUSED_MESSAGE, decidingRule: { source: "operator-pause", pattern: pauseCheck.scope } };
+    }
     const decision = evaluate(this.policy, this.principalId, request.credentialId, {
       method: request.method,
       url: request.url,
@@ -355,6 +366,20 @@ export class BrokerEngine {
       ...(request.idempotencyKey !== undefined ? { idempotencyKey: request.idempotencyKey } : {}),
     };
     await this.audit.write({ ...auditBase, outcome: "requested" });
+
+    // The operator's pause switch outranks every grant and is re-read on each
+    // request, so it stops traffic mid-flight. The reason the operator typed is
+    // never relayed to the agent or the audit: only the scope is.
+    const pauseCheck = await this.pause?.check(this.principalId, request.credentialId);
+    if (pauseCheck?.paused) {
+      await this.audit.write({ ...auditBase, outcome: "denied", detail: `paused by operator (${pauseCheck.scope})` });
+      return {
+        kind: "denied",
+        reason: PAUSED_MESSAGE,
+        decidingRule: { source: "operator-pause", pattern: pauseCheck.scope },
+        traceId,
+      };
+    }
 
     if (!decision.allowed || !decision.operation || !decision.credential || !decision.canonical) {
       await this.audit.write({ ...auditBase, outcome: "denied", detail: decision.reason });

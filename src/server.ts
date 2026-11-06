@@ -8,6 +8,7 @@ import { handleKeyRequest, keyRequestInputSchema } from "./key-request.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { AuditSink } from "./audit.js";
 import type { ApprovalStore, Clock, SecretProvider } from "./engine.js";
+import type { PauseGuard } from "./kill-switch.js";
 import type { KeyRequester } from "./key-request.js";
 import type { BrokerPolicy } from "./types.js";
 
@@ -20,6 +21,13 @@ export interface BrokerServices {
   fetchImpl?: typeof fetch;
   /** When present, registers broker_request_credential. Off unless the operator opts in. */
   keyRequests?: KeyRequester;
+  /** Operator pause switch, passed to the engine. */
+  pause?: PauseGuard;
+  /**
+   * Hot reload hook, called before each tool call. Returns a new policy and
+   * secrets when something changed and loaded cleanly, else null.
+   */
+  refresh?: () => Promise<{ policy: BrokerPolicy; secrets: SecretProvider } | null>;
 }
 
 /**
@@ -83,16 +91,31 @@ export const TOOL_CONTRACTS = {
 
 export function createBrokerMcpServer(services: BrokerServices, agentId: string): McpServer {
   const server = new McpServer({ name: "credential-broker-mcp", version: "0.1.0" });
-  const { policy } = services;
-  const engine = new BrokerEngine({
-    policy,
-    principalId: agentId,
-    secrets: services.secrets,
-    audit: services.audit,
-    ...(services.approvals ? { approvals: services.approvals } : {}),
-    ...(services.clock ? { clock: services.clock } : {}),
-    ...(services.fetchImpl ? { fetchImpl: services.fetchImpl } : {}),
-  });
+  let policy = services.policy;
+  let secrets = services.secrets;
+  const buildEngine = (): BrokerEngine =>
+    new BrokerEngine({
+      policy,
+      principalId: agentId,
+      secrets,
+      audit: services.audit,
+      ...(services.approvals ? { approvals: services.approvals } : {}),
+      ...(services.pause ? { pause: services.pause } : {}),
+      ...(services.clock ? { clock: services.clock } : {}),
+      ...(services.fetchImpl ? { fetchImpl: services.fetchImpl } : {}),
+    });
+  let engine = buildEngine();
+
+  // With hot reload on, pick up a changed policy or key before each call. The
+  // engine is rebuilt so its redactor covers the new secrets. A reload that
+  // fails leaves the previous state in place.
+  const sync = async (): Promise<void> => {
+    const next = await services.refresh?.();
+    if (!next) return;
+    policy = next.policy;
+    secrets = next.secrets;
+    engine = buildEngine();
+  };
 
   server.registerTool(
     "broker_whoami",
@@ -102,6 +125,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
       annotations: TOOL_CONTRACTS.broker_whoami.annotations,
     },
     async () => {
+      await sync();
       const agent = policy.agents.get(agentId);
       if (!agent) return errorResult(`Identity '${agentId}' is not provisioned in the policy.`);
       return jsonResult({
@@ -136,6 +160,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
       annotations: TOOL_CONTRACTS.broker_list_credentials.annotations,
     },
     async () => {
+      await sync();
       const agent = policy.agents.get(agentId);
       if (!agent) return errorResult(`Identity '${agentId}' is not provisioned in the policy.`);
       const granted = effectiveCredentialIds(policy, agentId)
@@ -147,7 +172,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
           kind: credential.kind,
           base_url: credential.baseUrl,
           high_risk: credential.highRisk,
-          provisioned: services.secrets.getSecret(credential.id) !== undefined,
+          provisioned: secrets.getSecret(credential.id) !== undefined,
         }));
       return jsonResult({ credentials: granted });
     },
@@ -169,6 +194,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
       annotations: TOOL_CONTRACTS.broker_explain_request.annotations,
     },
     async ({ credential, method, url, approval_id }) => {
+      await sync();
       const explained = await engine.explain({
         credentialId: credential,
         method,
@@ -195,6 +221,7 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
     approvalId?: string;
     idempotencyKey?: string;
   }): Promise<CallToolResult> => {
+    await sync();
     const result = await engine.execute({
       credentialId: input.credential,
       method: input.method,
@@ -288,11 +315,12 @@ export function createBrokerMcpServer(services: BrokerServices, agentId: string)
       },
       async (input) => {
         try {
+          await sync();
           const result = await handleKeyRequest(
             {
               requester,
               agentId,
-              isProvisioned: (id) => policy.credentials.has(id) && services.secrets.getSecret(id) !== undefined,
+              isProvisioned: (id) => policy.credentials.has(id) && secrets.getSecret(id) !== undefined,
               recordAudit: (credentialId, detail) =>
                 services.audit.write({
                   traceId: `key-request-${Date.now().toString(36)}`,

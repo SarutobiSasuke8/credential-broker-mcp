@@ -10,6 +10,18 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Panic button: a pause switch (`pause.json`) checked before every request, for
+  everything, one agent or one key. One click in the key manager, or
+  `npm run pause`. Fails closed (an unreadable file pauses everything), needs no
+  restart, outranks every grant, and never relays the operator's reason to the
+  agent or the audit. Adds the `operator-pause` deciding rule.
+- Opt-in hot reload (`BROKER_HOT_RELOAD=1`): the key manager writes a marker
+  after each change and a running broker rebuilds its policy and secrets. A
+  failed reload keeps the previous state and is audited.
+- Key manager: last-used and 30-day outcome counts per key from the audit log,
+  key replacement dates, provider key-page links, an Approvals panel (create and
+  revoke approvals for operations that already require one), per-agent and
+  per-key pause, and about twenty known providers.
 - Opt-in `broker_request_credential` tool (`BROKER_ALLOW_KEY_REQUESTS=1`):
   an agent can ask the operator for a key. The broker opens the key manager
   in the operator's browser, pre-filled with the name, the agent's reason and

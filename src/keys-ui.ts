@@ -9,9 +9,13 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { findPresetById, scanForKeys } from "./import-scan.js";
-import { effectiveCredentialIds } from "./grants.js";
-import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
+import { findPresetById, findPresetByOrigin, scanForKeys } from "./import-scan.js";
+import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
+import { approvalState, createApproval, parseApprovals, pruneApprovals, revokeApproval, serializeApprovals } from "./approvals-admin.js";
+import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, markRotated, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
+import { anyPauseActive, applyPause, EMPTY_PAUSE, MAX_PAUSE_REASON, parsePauseState, pauseFilePath, serializePauseState } from "./kill-switch.js";
+import { reloadMarkerPath, touchReloadMarker } from "./reload.js";
+import { readAuditLines, summarizeUsage, USAGE_WINDOW_DAYS } from "./usage.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
 import { renderKeysPage } from "./keys-page.js";
 import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
@@ -38,6 +42,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(packageRoot, "config", "broker.yaml"));
 const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(packageRoot, "data", "audit.jsonl"));
 const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(packageRoot, "config", "approvals.json"));
+const pauseFile = pauseFilePath(policyFile);
+const reloadMarker = reloadMarkerPath(policyFile);
 const keyNotesFile = resolve(process.env.BROKER_KEY_NOTES_FILE ?? join(dirname(policyFile), "key-notes.json"));
 const stdioEntry = join(packageRoot, "dist", "src", "stdio.js");
 const requestedPort = Number(process.env.BROKER_KEYS_PORT ?? 0);
@@ -101,12 +107,34 @@ async function loadPolicy(): Promise<{ policy: BrokerPolicy | null; error: strin
   }
 }
 
+/** Tells brokers running with BROKER_HOT_RELOAD=1 that policy or keys changed. Best effort. */
+async function notifyReload(): Promise<void> {
+  try {
+    await touchReloadMarker(reloadMarker);
+  } catch {
+    // A broker without hot reload ignores the marker anyway.
+  }
+}
+
 /** Write via a temp file and keep one backup, so a crash never truncates the policy. */
 async function writePolicy(text: string): Promise<void> {
   if (existsSync(policyFile)) await copyFile(policyFile, `${policyFile}.bak`);
   const temp = `${policyFile}.tmp-${process.pid}`;
   await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
   await rename(temp, policyFile);
+  await notifyReload();
+}
+
+async function readPause() {
+  if (!existsSync(pauseFile)) return { state: EMPTY_PAUSE, unreadable: false };
+  const parsed = parsePauseState(await readFile(pauseFile, "utf8").catch(() => ""));
+  return parsed.ok ? { state: parsed.state, unreadable: false } : { state: EMPTY_PAUSE, unreadable: true };
+}
+
+async function writeAtomic(file: string, text: string): Promise<void> {
+  const temp = `${file}.tmp-${process.pid}`;
+  await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
+  await rename(temp, file);
 }
 
 async function readKeyMeta() {
@@ -129,14 +157,33 @@ async function buildState(): Promise<object> {
   const stored = new Map((store ? await store.list() : []).map((k) => [k.id, k.comment]));
   const meta = await readKeyMeta();
   const now = new Date();
+  const usage = summarizeUsage(await readAuditLines(auditFile), now);
+  const pause = await readPause();
+  const approvals = (await readApprovals()).map((a) => ({
+    id: a.id,
+    agentId: a.agent_id,
+    credentialId: a.credential_id,
+    operationId: a.operation_id,
+    expiresAt: a.expires_at,
+    state: approvalState(a, now),
+  }));
   const metaFor = (id: string) => {
     const entry = meta.keys[id];
     const status = expiryStatus(entry?.expires ?? null, now);
-    return { expires: entry?.expires ?? null, userNote: entry?.note ?? "", expiryState: status.state, expiryDays: status.days };
+    return {
+      expires: entry?.expires ?? null,
+      userNote: entry?.note ?? "",
+      rotatedAt: entry?.rotatedAt ?? null,
+      expiryState: status.state,
+      expiryDays: status.days,
+    };
   };
   const credentials = policy
     ? [...policy.credentials.values()].map((c) => ({
         ...metaFor(c.id),
+        usage: usage.get(c.id) ?? null,
+        manageUrl: findPresetByOrigin(c.baseUrl)?.keysUrl ?? null,
+        paused: pause.state.credentials[c.id] !== undefined,
         id: c.id,
         description: c.description,
         kind: c.kind,
@@ -163,6 +210,25 @@ async function buildState(): Promise<object> {
       .map(([id, note]) => ({ ...metaFor(id), id, note }))
       .sort((a, b) => a.id.localeCompare(b.id)),
     expiryWarningDays: EXPIRY_WARNING_DAYS,
+    usageWindowDays: USAGE_WINDOW_DAYS,
+    pause: {
+      active: anyPauseActive(pause.state) || pause.unreadable,
+      unreadable: pause.unreadable,
+      all: pause.state.all,
+      agents: pause.state.agents,
+      credentials: pause.state.credentials,
+    },
+    approvals,
+    // Operations the policy marks as needing an approval, per agent and credential.
+    approvable: policy
+      ? [...policy.agents.values()].flatMap((a) =>
+          effectiveCredentialIds(policy, a.id).flatMap((credentialId) =>
+            (effectiveGrant(policy, a.id, credentialId)?.operations ?? [])
+              .filter((o) => o.requiresApproval)
+              .map((o) => ({ agentId: a.id, credentialId, operationId: o.id, method: o.method, path: o.path })),
+          ),
+        )
+      : [],
     agents,
     groups: policy ? [...policy.groups].map(([id, members]) => ({ id, members })) : [],
     register: {
@@ -212,8 +278,12 @@ async function saveSecret(body: unknown): Promise<object> {
   const input = saveSecretSchema.parse(body);
   const value = cleanSecret(input.value);
   if (!value) throw new HttpError(400, "Paste a key first.");
-  await requireStore().set(input.credentialId, value);
-  return { ok: true };
+  const keychain = requireStore();
+  const replacing = (await keychain.list()).some((k) => k.id === input.credentialId);
+  await keychain.set(input.credentialId, value);
+  if (replacing) await writeKeyMeta(markRotated(await readKeyMeta(), input.credentialId));
+  await notifyReload();
+  return { ok: true, rotated: replacing };
 }
 
 async function saveMeta(body: unknown): Promise<object> {
@@ -229,7 +299,64 @@ async function saveMeta(body: unknown): Promise<object> {
 async function deleteSecret(body: unknown): Promise<object> {
   const input = credentialRefSchema.parse(body);
   const removed = await requireStore().delete(input.credentialId);
+  await notifyReload();
   return { ok: true, removed };
+}
+
+const pauseSchema = z.object({
+  scope: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("all") }),
+    z.object({ kind: z.literal("agent"), id: ID }),
+    z.object({ kind: z.literal("credential"), id: ID }),
+  ]),
+  active: z.boolean(),
+  reason: z.string().max(MAX_PAUSE_REASON).default(""),
+});
+
+async function setPause(body: unknown): Promise<object> {
+  const input = pauseSchema.parse(body);
+  const { state } = await readPause();
+  await writeAtomic(pauseFile, serializePauseState(applyPause(state, input.scope, input.active, input.reason)));
+  return { ok: true };
+}
+
+const approvalCreateSchema = z.object({
+  agentId: ID,
+  credentialId: ID,
+  operationId: ID,
+  minutes: z.number().int().min(1).max(24 * 60),
+});
+const approvalRevokeSchema = z.object({ approvalId: z.string().min(1).max(128) });
+
+async function readApprovals() {
+  return parseApprovals(existsSync(approvalsFile) ? await readFile(approvalsFile, "utf8") : null);
+}
+
+async function createApprovalEntry(body: unknown): Promise<object> {
+  const input = approvalCreateSchema.parse(body);
+  const { policy } = await loadPolicy();
+  if (!policy) throw new HttpError(409, "Fix the policy file first.");
+  // Only an operation the policy already marks as needing approval can be approved.
+  const grant = effectiveGrant(policy, input.agentId, input.credentialId);
+  const operation = grant?.operations.find((o) => o.id === input.operationId);
+  if (!operation?.requiresApproval) {
+    throw new HttpError(400, "That operation does not exist for this agent, or does not require an approval.");
+  }
+  try {
+    const { entries, created } = createApproval(pruneApprovals(await readApprovals(), 7), input);
+    await writeAtomic(approvalsFile, serializeApprovals(entries));
+    return { ok: true, approvalId: created.id, expiresAt: created.expires_at };
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function revokeApprovalEntry(body: unknown): Promise<object> {
+  const input = approvalRevokeSchema.parse(body);
+  const next = revokeApproval(await readApprovals(), input.approvalId);
+  if (!next) throw new HttpError(404, "No approval with that id.");
+  await writeAtomic(approvalsFile, serializeApprovals(next));
+  return { ok: true };
 }
 
 async function addCredential(body: unknown): Promise<object> {
@@ -445,6 +572,7 @@ async function applyImport(body: unknown): Promise<object> {
   }
 
   if (policyChanged && text !== null) await writePolicy(text);
+  else if (results.some((r) => r.ok)) await notifyReload();
 
   // Prove each new API key works, now that the policy is on disk.
   if (policyChanged && text !== null) {
@@ -527,6 +655,9 @@ const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/secret": saveSecret,
   "POST /api/secret/delete": deleteSecret,
   "POST /api/meta": saveMeta,
+  "POST /api/pause": setPause,
+  "POST /api/approvals/create": createApprovalEntry,
+  "POST /api/approvals/revoke": revokeApprovalEntry,
   "POST /api/credential": addCredential,
   "POST /api/test": testCredential,
   "POST /api/state": () => buildState(),

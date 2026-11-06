@@ -118,6 +118,18 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
 .irow .flag.warn { color: var(--warn); } .irow .flag.ok { color: var(--ok); } .irow .flag.bad { color: var(--bad); }
 .irow input[type=text] { width: 100%; }
 .import-controls select { margin-left: 6px; }
+button.panic { background: var(--bad); color: #ffffff; border-color: var(--bad); }
+button.panic:hover { filter: brightness(1.1); border-color: var(--bad); }
+button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); }
+.pill.paused { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+.banner.pause { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); }
+.banner.pause .row { margin-top: 8px; }
+.usage { margin: 0 16px 10px; font-size: 13px; color: var(--muted); }
+.usage strong { color: var(--ink); font-weight: 600; }
+.agent-row, .appr-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+.agent-row:first-child, .appr-row:first-child { border-top: 0; }
+.appr-id { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+.linkout { font-size: 13px; color: var(--accent); }
 @media (max-width: 760px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
   .grid { grid-template-columns: 1fr; }
@@ -136,9 +148,13 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
         <p class="sub" id="where">Loading…</p>
       </div>
     </div>
-    <button class="ghost" id="close">Close</button>
+    <div class="tools">
+      <button class="panic" id="panic" title="Stops every agent request on its next call. Nothing is deleted.">Pause all access</button>
+      <button class="ghost" id="close">Close</button>
+    </div>
   </header>
 
+  <div id="pauseBanner"></div>
   <div id="requestBanner"></div>
   <div id="banner"></div>
   <div class="stats" id="stats"></div>
@@ -222,6 +238,19 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
     <div id="list"><p class="empty">Loading…</p></div>
     <div id="storedOnly"></div>
   </section>
+
+  <section id="accessSection">
+    <div class="section-head"><h2>Agents</h2></div>
+    <p class="hint">Pause one agent without touching the others. A pause takes effect on the agent's next request and needs no restart. Nothing is deleted, and resuming restores exactly what was there.</p>
+    <div id="agentList"></div>
+  </section>
+
+  <details class="panel" id="approvalsPanel">
+    <summary>Approvals for state-changing requests</summary>
+    <p class="hint">Operations the policy marks as needing approval stay blocked until you create an approval here and give its id to the agent. Approvals expire on their own and can be revoked at any time.</p>
+    <div id="approvalCreate"></div>
+    <div id="approvalList"></div>
+  </details>
 
   <details class="panel" id="importPanel">
     <summary>Import keys already on this computer</summary>
@@ -325,6 +354,35 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
 
   function needsAttention(c) { return c.expiryState === "expired" || c.expiryState === "soon"; }
 
+  function ago(iso) {
+    var ms = Date.now() - Date.parse(iso);
+    if (isNaN(ms)) return "";
+    var mins = Math.round(ms / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return mins + " min ago";
+    var hours = Math.round(mins / 60);
+    if (hours < 48) return hours + (hours === 1 ? " hour ago" : " hours ago");
+    var days = Math.round(hours / 24);
+    return days + " days ago";
+  }
+
+  function usageLine(c) {
+    var parts = [];
+    var u = c.usage;
+    if (u && u.lastAt) {
+      parts.push(el("span", {}, [document.createTextNode("Last used "), el("strong", { text: ago(u.lastAt) }), document.createTextNode(u.lastAgent ? " by " + u.lastAgent : "")]));
+      parts.push(document.createTextNode(" · last " + state.usageWindowDays + " days: " + u.succeeded + " succeeded, " + u.denied + " denied, " + u.failed + " failed"));
+    } else {
+      parts.push(document.createTextNode("Not used by any agent yet"));
+    }
+    if (c.rotatedAt) parts.push(document.createTextNode(" · key replaced " + ago(c.rotatedAt)));
+    return el("div", { className: "usage" }, parts);
+  }
+
+  function setPause(scope, active) {
+    return api("/api/pause", { scope: scope, active: active, reason: "" }).then(function () { return refresh(); });
+  }
+
   function rank(c) {
     if (c.expiryState === "expired") return 0;
     if (c.expiryState === "soon") return 1;
@@ -403,6 +461,19 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
       ? el("p", { className: "hint usernote", text: "Set by " + c.envVar + " in the environment or .env, which overrides a saved key." })
       : c.note ? el("p", { className: "hint usernote", text: c.note }) : null;
 
+    var pauseBtn = el("button", { className: c.paused ? "resume" : "ghost danger", text: c.paused ? "Resume this key" : "Pause this key" });
+    pauseBtn.addEventListener("click", function () {
+      busy(pauseBtn, function () {
+        return setPause({ kind: "credential", id: c.id }, !c.paused).catch(function (e) { say(result, "bad", e.message); });
+      });
+    });
+    var manageLink = c.manageUrl
+      ? el("p", { className: "hint" }, [
+          document.createTextNode("When you replace a key, revoke the old one at the provider too. "),
+          el("a", { className: "linkout", href: c.manageUrl, target: "_blank", rel: "noopener noreferrer", text: "Open key settings" })
+        ])
+      : null;
+
     var openByDefault = hadFlash || c.source === "missing" || needsAttention(c);
     var manage = el("details", { className: "manage" }, [
       el("summary", { text: "Manage" }),
@@ -412,7 +483,8 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
         metaResult,
         el("div", { className: "block-label", text: "Key" }),
         el("div", { className: "row" }, [input, save]),
-        el("div", { className: "row" }, [testPath, test, c.source === "keychain" ? remove : null]),
+        manageLink,
+        el("div", { className: "row" }, [testPath, test, c.source === "keychain" ? remove : null, pauseBtn]),
         result
       ])
     ]);
@@ -422,10 +494,12 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
       el("div", { className: "card-head" }, [
         el("div", {}, [el("div", { className: "name", text: c.id }), el("div", { className: "meta", text: (c.description ? c.description + " · " : "") + meta })]),
         el("div", { className: "pills" }, [
+          c.paused ? el("span", { className: "pill paused", text: "Paused" }) : null,
           el("span", { className: "pill " + c.source, text: SOURCE_LABEL[c.source] }),
           el("span", { className: "pill " + pill.kind, text: pill.text })
         ])
       ]),
+      usageLine(c),
       c.userNote ? el("div", { className: "usernote", text: c.userNote }) : null,
       envNote,
       manage
@@ -508,6 +582,121 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
     rows.forEach(function (c) { list.appendChild(renderCard(c)); });
   }
 
+  function renderPause() {
+    var p = state.pause;
+    var panic = document.getElementById("panic");
+    var allPaused = !!p.all || p.unreadable;
+    panic.textContent = allPaused ? "Resume all access" : "Pause all access";
+    panic.className = allPaused ? "resume" : "panic";
+    var holder = document.getElementById("pauseBanner");
+    holder.replaceChildren();
+    if (!p.active) return;
+    var lines = [];
+    if (p.unreadable) {
+      lines.push(el("strong", { text: "The pause file cannot be read, so every broker treats all access as paused." }));
+      lines.push(el("div", { className: "hint", text: "Resuming writes a fresh, valid file." }));
+    } else if (p.all) {
+      lines.push(el("strong", { text: "All agent access is paused (since " + ago(p.all.at) + ")." }));
+      lines.push(el("div", { className: "hint", text: "Every request is refused on its next call. Nothing was deleted." }));
+    } else {
+      lines.push(el("strong", { text: "Some access is paused." }));
+    }
+    var rows = el("div", { className: "row" });
+    if (p.unreadable || p.all) {
+      var resumeAll = el("button", { className: "resume", text: "Resume all access" });
+      resumeAll.addEventListener("click", function () {
+        if (!confirm("Resume access for every agent that is not paused individually?")) return;
+        busy(resumeAll, function () { return setPause({ kind: "all" }, false); });
+      });
+      rows.appendChild(resumeAll);
+    }
+    Object.keys(p.agents).forEach(function (id) {
+      var b = el("button", { text: "Resume agent " + id });
+      b.addEventListener("click", function () { busy(b, function () { return setPause({ kind: "agent", id: id }, false); }); });
+      rows.appendChild(b);
+    });
+    Object.keys(p.credentials).forEach(function (id) {
+      var b = el("button", { text: "Resume key " + id });
+      b.addEventListener("click", function () { busy(b, function () { return setPause({ kind: "credential", id: id }, false); }); });
+      rows.appendChild(b);
+    });
+    lines.push(rows);
+    holder.appendChild(el("div", { className: "banner pause", role: "alert" }, lines));
+  }
+
+  function renderAgents() {
+    var holder = document.getElementById("agentList");
+    holder.replaceChildren();
+    if (!state.agents.length) { holder.appendChild(el("p", { className: "empty", text: "No agents in the policy yet." })); return; }
+    state.agents.forEach(function (a) {
+      var paused = !!state.pause.agents[a.id];
+      var btn = el("button", { className: paused ? "resume" : "ghost danger", text: paused ? "Resume" : "Pause" });
+      btn.addEventListener("click", function () { busy(btn, function () { return setPause({ kind: "agent", id: a.id }, !paused); }); });
+      var granted = state.credentials.filter(function (c) { return c.grantedTo.indexOf(a.id) !== -1; }).length;
+      holder.appendChild(el("div", { className: "agent-row" }, [
+        el("div", {}, [
+          el("div", { className: "name", text: a.displayName && a.displayName !== a.id ? a.displayName + " (" + a.id + ")" : a.id }),
+          el("div", { className: "meta", text: granted + (granted === 1 ? " key" : " keys") + (a.enabled ? "" : " · disabled in the policy") })
+        ]),
+        el("div", { className: "pills" }, [paused ? el("span", { className: "pill paused", text: "Paused" }) : null, btn])
+      ]));
+    });
+  }
+
+  function renderApprovals() {
+    var create = document.getElementById("approvalCreate");
+    var list = document.getElementById("approvalList");
+    create.replaceChildren();
+    list.replaceChildren();
+
+    if (!state.approvable.length) {
+      create.appendChild(el("p", { className: "empty", text: "No operation in the policy requires an approval, so there is nothing to approve." }));
+    } else {
+      var pick = el("select", { "aria-label": "Operation to approve" });
+      state.approvable.forEach(function (o, i) {
+        pick.appendChild(el("option", { value: String(i), text: o.agentId + " · " + o.credentialId + " · " + o.method + " " + o.path + " (" + o.operationId + ")" }));
+      });
+      var minutes = el("input", { type: "number", min: "1", max: "1440", value: "30", "aria-label": "Minutes until the approval expires" });
+      var go = el("button", { className: "primary", text: "Create approval" });
+      var out = el("div", { className: "result", role: "status" });
+      go.addEventListener("click", function () {
+        var o = state.approvable[Number(pick.value)];
+        busy(go, function () {
+          return api("/api/approvals/create", { agentId: o.agentId, credentialId: o.credentialId, operationId: o.operationId, minutes: Number(minutes.value) })
+            .then(function (r) {
+              return refresh().then(function () {
+                var again = document.getElementById("approvalCreate");
+                again.appendChild(el("div", { className: "banner warn" }, [
+                  document.createTextNode("Give the agent this approval id: "),
+                  el("span", { className: "appr-id", text: r.approvalId }),
+                  el("div", { className: "hint", text: "Valid until " + r.expiresAt + ". It covers that one operation for that one agent." })
+                ]));
+              });
+            })
+            .catch(function (e) { say(out, "bad", e.message); });
+        });
+      });
+      create.appendChild(el("div", { className: "row" }, [pick, el("label", { className: "hint" }, [document.createTextNode("Minutes "), minutes]), go]));
+      create.appendChild(out);
+    }
+
+    var rows = state.approvals.slice().sort(function (a, b) { return Date.parse(b.expiresAt) - Date.parse(a.expiresAt); });
+    if (!rows.length) { list.appendChild(el("p", { className: "empty", text: "No approvals yet." })); return; }
+    rows.forEach(function (a) {
+      var revoke = a.state === "active" ? el("button", { className: "ghost danger small", text: "Revoke" }) : null;
+      if (revoke) revoke.addEventListener("click", function () {
+        busy(revoke, function () { return api("/api/approvals/revoke", { approvalId: a.id }).then(function () { return refresh(); }); });
+      });
+      list.appendChild(el("div", { className: "appr-row" }, [
+        el("div", {}, [
+          el("div", { className: "appr-id", text: a.id }),
+          el("div", { className: "meta", text: a.agentId + " · " + a.credentialId + " · " + a.operationId + " · until " + a.expiresAt })
+        ]),
+        el("div", { className: "pills" }, [el("span", { className: "pill " + (a.state === "active" ? "ok" : a.state === "revoked" ? "expired" : "none"), text: a.state }), revoke])
+      ]));
+    });
+  }
+
   function render() {
     var where = document.getElementById("where");
     where.textContent = state.policyFile + (state.keychain ? " · keys in " + state.keychain : "");
@@ -527,6 +716,9 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
 
     renderStats();
     renderList();
+    renderPause();
+    renderAgents();
+    renderApprovals();
 
     var storedOnly = document.getElementById("storedOnly");
     storedOnly.replaceChildren();
@@ -712,6 +904,14 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
         return refresh();
       }).catch(function (err) { say(result, "bad", err.message); });
     });
+  });
+
+  // One click pauses everything; resuming asks first.
+  document.getElementById("panic").addEventListener("click", function (e) {
+    var button = e.target;
+    var paused = !!state.pause.all || state.pause.unreadable;
+    if (paused && !confirm("Resume access for every agent that is not paused individually?")) return;
+    busy(button, function () { return setPause({ kind: "all" }, !paused).catch(function (err) { alert(err.message); }); });
   });
 
   document.getElementById("connectAgent").addEventListener("change", renderConnect);
