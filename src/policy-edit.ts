@@ -145,6 +145,69 @@ export function addCredentialToPolicy(existingText: string | null, input: NewCre
   return text;
 }
 
+export interface NewAgentInput {
+  id: string;
+  displayName: string;
+  enabled: boolean;
+  /**
+   * APIs the agent may read. Nothing is granted unless listed here: a new
+   * agent is deny-by-default. Each entry becomes one GET /** operation.
+   */
+  reads: { credentialId: string; queryParams: string[] }[];
+}
+
+/**
+ * Adds an agent to the policy. Same rules as addCredentialToPolicy: the YAML
+ * document model keeps operator comments, only read operations are ever
+ * written, and the result must pass parseBrokerPolicy() before it is returned.
+ */
+export function addAgentToPolicy(existingText: string | null, input: NewAgentInput): string {
+  if (existingText === null) throw new Error("No policy file yet. Add a key first, then add agents.");
+  const doc = YAML.parseDocument(existingText);
+  if (doc.errors.length > 0) throw new Error(`Policy file is not valid YAML: ${doc.errors[0]?.message ?? "parse error"}`);
+
+  const agents = seqAt(doc, "agents");
+  const credentials = seqAt(doc, "credentials");
+  if (agents.items.some((item) => YAML.isMap(item) && item.get("id") === input.id)) {
+    throw new Error(`An agent named '${input.id}' already exists.`);
+  }
+  const groups = doc.get("groups", true);
+  if (YAML.isMap(groups) && groups.has(input.id)) throw new Error(`'${input.id}' is already a group name.`);
+
+  const known = new Set(credentials.items.map((item) => (YAML.isMap(item) ? String(item.get("id")) : "")));
+  const seen = new Set<string>();
+  const grants = input.reads.map((read) => {
+    if (!known.has(read.credentialId)) throw new Error(`No API named '${read.credentialId}' in the policy.`);
+    if (seen.has(read.credentialId)) throw new Error(`API '${read.credentialId}' selected twice.`);
+    seen.add(read.credentialId);
+    return {
+      credential: read.credentialId,
+      operations: [{
+        id: "read",
+        method: "GET",
+        path: "/**",
+        ...(read.queryParams.length > 0 ? { query_params: read.queryParams } : {}),
+        response_body: true,
+      }],
+    };
+  });
+
+  agents.add(doc.createNode({
+    id: input.id,
+    display_name: input.displayName || input.id,
+    enabled: input.enabled,
+    grants,
+  }));
+
+  const text = doc.toString();
+  try {
+    parseBrokerPolicy(text);
+  } catch (error) {
+    throw new Error(describePolicyError(error));
+  }
+  return text;
+}
+
 /** Zod errors are JSON walls; turn them into one line. */
 export function describePolicyError(error: unknown): string {
   if (error && typeof error === "object" && "issues" in error && Array.isArray(error.issues)) {
