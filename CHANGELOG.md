@@ -47,6 +47,22 @@ reload paths, all fixed here:
 
 ### Added
 
+- Key manager redesign. A sticky header with global search (`/` and
+  `Ctrl+K`, grouped results, arrow keys and Enter), a New key button that
+  opens a side drawer with a searchable provider picker, the pause control
+  and a status chip. Hash-routed pages with no reload: Overview (tiles,
+  attention list, recent activity), Keys (sortable table, filter chips,
+  detail panel with every manage action), Agents, Approvals, Activity
+  (content-free audit view with agent, key, outcome and time filters and
+  CSV export), Import and Settings. Light and dark themes following the
+  system with a remembered toggle, system fonts only, reduced-motion
+  support, focus trapping in drawers and dialogs, `aria-live` status, and
+  a layout that works from 360px up. The page source now lives in
+  `src/ui/` as separate TypeScript, CSS and HTML files built into
+  `dist/ui` and served by the key manager itself on loopback under the
+  same CSP (a fresh nonce per load, no external assets). The session token
+  moves from the fragment into `sessionStorage` for this tab, so a reload
+  keeps the session. New content-free `POST /api/activity` endpoint.
 - Key storage on macOS (login keychain through `security -i`, the secret
   over stdin) and Linux (Secret Service through `secret-tool`), behind the
   same `SecretStore` interface as Windows, picked by platform. All three
