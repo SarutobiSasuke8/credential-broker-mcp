@@ -130,6 +130,25 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
 .agent-row:first-child, .appr-row:first-child { border-top: 0; }
 .appr-id { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; word-break: break-all; }
 .linkout { font-size: 13px; color: var(--accent); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.backdrop { position: fixed; inset: 0; background: rgba(10, 12, 16, 0.55); display: grid; place-items: center; padding: 20px; z-index: 50; }
+.modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35); width: min(520px, 100%); padding: 22px 24px; }
+.modal h2 { font-size: 18px; margin: 0 0 8px; }
+.modal p { margin: 0 0 10px; font-size: 14.5px; }
+.modal .facts { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.modal .facts .pill { font-size: 13px; }
+.modal label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 10px; }
+.modal label input { font-size: 16px; letter-spacing: 0.08em; font-weight: 600; color: var(--ink); text-transform: uppercase; }
+.modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.modal.danger h2 { color: var(--bad); }
+.toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; width: min(560px, calc(100% - 32px)); }
+.toast { background: var(--ink); color: var(--bg); border-radius: var(--radius-sm); padding: 12px 14px; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: 14px; animation: rise 0.16s ease-out; }
+.toast .grow { flex: 1; }
+.toast button { background: transparent; color: inherit; border-color: rgba(255, 255, 255, 0.35); padding: 5px 12px; font-size: 13px; }
+.toast button:hover { border-color: currentColor; }
+.toast .count { font-variant-numeric: tabular-nums; opacity: 0.75; font-size: 12.5px; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } .manage > summary::before { transition: none; } }
 @media (max-width: 760px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
   .grid { grid-template-columns: 1fr; }
@@ -149,7 +168,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
       </div>
     </div>
     <div class="tools">
-      <button class="panic" id="panic" title="Stops every agent request on its next call. Nothing is deleted.">Pause all access</button>
+      <button class="panic" id="panic" title="Stops every agent request on its next call. Nothing is deleted. Asks you to type PAUSE.">Pause all access</button>
       <button class="ghost" id="close">Close</button>
     </div>
   </header>
@@ -241,7 +260,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
 
   <section id="accessSection">
     <div class="section-head"><h2>Agents</h2></div>
-    <p class="hint">Pause one agent without touching the others. A pause takes effect on the agent's next request and needs no restart. Nothing is deleted, and resuming restores exactly what was there.</p>
+    <p class="hint">Pause one agent without touching the others. A pause takes effect on the agent's next request and needs no restart. Nothing is deleted, and resuming restores exactly what was there. Every pause and resume is written to the audit log.</p>
     <div id="agentList"></div>
   </section>
 
@@ -276,6 +295,9 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     <p class="hint">Restart Claude Code after adding or changing a key: the broker loads keys once when it starts.</p>
   </details>
 </main>
+<div id="modalHost"></div>
+<div class="toasts" id="toasts"></div>
+<div class="sr-only" id="live" aria-live="assertive" role="status"></div>
 
 <script nonce="${nonce}">
 (function () {
@@ -331,6 +353,98 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     return fn().finally(function () { button.disabled = false; });
   }
 
+  function announce(text) {
+    var live = document.getElementById("live");
+    live.textContent = "";
+    setTimeout(function () { live.textContent = text; }, 30);
+  }
+
+  // A small dialog. Resolves true on confirm, false on cancel or Esc. With
+  // opts.word set, the confirm button stays disabled until that word is typed
+  // (case-insensitive, trimmed), Enter confirms once it matches, and focus
+  // starts in the field. Focus is trapped inside and restored afterwards.
+  function openModal(opts) {
+    return new Promise(function (resolveModal) {
+      var host = document.getElementById("modalHost");
+      var previous = document.activeElement;
+      var field = null;
+      var confirmBtn = el("button", { type: "button", className: opts.danger ? "panic" : "primary", text: opts.confirmLabel || "Confirm" });
+      var cancelBtn = el("button", { type: "button", className: "ghost", text: "Cancel" });
+      var body = el("div", {}, opts.body || []);
+      if (opts.word) {
+        field = el("input", { type: "text", autocomplete: "off", spellcheck: "false", autocapitalize: "characters", placeholder: opts.word, "aria-describedby": "modalWhy" });
+        body.appendChild(el("label", { text: "Type " + opts.word + " to confirm" }, [field]));
+        confirmBtn.disabled = true;
+      }
+      var box = el("div", { className: "modal" + (opts.danger ? " danger" : ""), role: "dialog", "aria-modal": "true", "aria-labelledby": "modalTitle" }, [
+        el("h2", { id: "modalTitle", text: opts.title }),
+        body,
+        el("div", { className: "actions" }, [cancelBtn, confirmBtn])
+      ]);
+      var backdrop = el("div", { className: "backdrop" }, [box]);
+      function matches() { return !opts.word || field.value.trim().toUpperCase() === opts.word; }
+      function close(result) {
+        document.removeEventListener("keydown", onKey, true);
+        backdrop.remove();
+        if (previous && previous.focus) previous.focus();
+        resolveModal(result);
+      }
+      function onKey(e) {
+        if (e.key === "Escape") { e.preventDefault(); close(false); return; }
+        if (e.key === "Enter" && !(e.target && e.target.tagName === "BUTTON")) { e.preventDefault(); if (matches()) close(true); return; }
+        if (e.key === "Tab") {
+          var focusable = Array.from(box.querySelectorAll("input, button")).filter(function (n) { return !n.disabled; });
+          var first = focusable[0], last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      }
+      if (field) field.addEventListener("input", function () { confirmBtn.disabled = !matches(); });
+      confirmBtn.addEventListener("click", function () { if (matches()) close(true); });
+      cancelBtn.addEventListener("click", function () { close(false); });
+      backdrop.addEventListener("mousedown", function (e) { if (e.target === backdrop) close(false); });
+      document.addEventListener("keydown", onKey, true);
+      host.replaceChildren(backdrop);
+      (field || cancelBtn).focus();
+    });
+  }
+
+  // A short message at the bottom of the page. With opts.undo, an Undo button
+  // and a countdown stay for opts.seconds (default 8); the undo runs at most once.
+  function toast(text, opts) {
+    opts = opts || {};
+    var host = document.getElementById("toasts");
+    var seconds = opts.seconds || (opts.undo ? 8 : 4);
+    var left = seconds;
+    var done = false;
+    var count = el("span", { className: "count", text: String(left) + "s" });
+    var node = el("div", { className: "toast", role: "status" }, [el("span", { className: "grow", text: text })]);
+    function finish() {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      node.remove();
+    }
+    if (opts.undo) {
+      var undoBtn = el("button", { type: "button", text: "Undo" });
+      undoBtn.addEventListener("click", function () {
+        if (done) return;
+        finish();
+        opts.undo();
+      });
+      node.appendChild(count);
+      node.appendChild(undoBtn);
+    }
+    var timer = setInterval(function () {
+      left -= 1;
+      count.textContent = String(left) + "s";
+      if (left <= 0) finish();
+    }, 1000);
+    host.appendChild(node);
+    announce(text);
+    return { close: finish };
+  }
+
   var KIND_LABEL = { bearer: "Bearer token", header: "Header", basic: "Basic auth", query: "URL parameter" };
   var SOURCE_LABEL = { keychain: "Key saved", env: "Key from environment", missing: "No key yet" };
 
@@ -379,8 +493,87 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     return el("div", { className: "usage" }, parts);
   }
 
-  function setPause(scope, active) {
-    return api("/api/pause", { scope: scope, active: active, reason: "" }).then(function () { return refresh(); });
+  function setPause(scope, active, extra) {
+    var body = { scope: scope, active: active, reason: "" };
+    if (extra && extra.confirm) body.confirm = extra.confirm;
+    if (extra && extra.undo) body.undo = true;
+    return api("/api/pause", body).then(function () { return refresh(); });
+  }
+
+  function scopeLabel(scope) {
+    return scope.kind === "agent" ? "agent " + scope.id : "key " + scope.id;
+  }
+
+  // Pausing one agent or key: a plain confirmation, then an eight second Undo.
+  // Resuming one: a confirmation. Errors land in the given result node.
+  function pauseScope(scope, active, result) {
+    var label = scopeLabel(scope);
+    var ask = active
+      ? openModal({
+          title: "Pause " + label + "?",
+          danger: true,
+          confirmLabel: "Pause",
+          body: [el("p", { text: (scope.kind === "agent" ? "Every request from this agent" : "Every request for this key") + " will be refused on its next call. Nothing is deleted, and you can resume at any time." })]
+        })
+      : openModal({
+          title: "Resume " + label + "?",
+          confirmLabel: "Resume",
+          body: [el("p", { text: "Requests " + (scope.kind === "agent" ? "from this agent" : "for this key") + " will be allowed again, as the policy already permits." })]
+        });
+    return ask.then(function (yes) {
+      if (!yes) return;
+      return setPause(scope, active).then(function () {
+        if (active) {
+          toast("Paused " + label + ".", {
+            undo: function () {
+              setPause(scope, false, { undo: true })
+                .then(function () { toast("Resumed " + label + "."); })
+                .catch(function (e) { if (result) say(result, "bad", e.message); else alert(e.message); });
+            }
+          });
+        } else {
+          toast("Resumed " + label + ".");
+        }
+      }).catch(function (e) { if (result) say(result, "bad", e.message); else alert(e.message); });
+    });
+  }
+
+  // The global switch. Pausing asks for the word PAUSE; resuming asks for
+  // RESUME, because resuming is the risky direction. The server checks the
+  // word as well, so a stray request cannot flip it either.
+  function pauseAll(active) {
+    var agents = state.agents.length;
+    var keys = state.credentials.length;
+    var facts = el("div", { className: "facts" }, [
+      el("span", { className: "pill", text: agents + (agents === 1 ? " agent" : " agents") }),
+      el("span", { className: "pill", text: keys + (keys === 1 ? " key" : " keys") })
+    ]);
+    var ask = active
+      ? openModal({
+          title: "Pause all access?",
+          danger: true,
+          confirmLabel: "Pause everything",
+          word: "PAUSE",
+          body: [
+            el("p", { id: "modalWhy", text: "Every agent request will be refused on its next call. Nothing is deleted. You can resume at any time." }),
+            facts
+          ]
+        })
+      : openModal({
+          title: "Resume all access?",
+          confirmLabel: "Resume everything",
+          word: "RESUME",
+          body: [
+            el("p", { id: "modalWhy", text: "Every agent that is not paused individually will be allowed to make requests again, as the policy permits." }),
+            facts
+          ]
+        });
+    return ask.then(function (yes) {
+      if (!yes) return;
+      return setPause({ kind: "all" }, active, { confirm: active ? "PAUSE" : "RESUME" })
+        .then(function () { toast(active ? "All access is paused." : "All access is live again."); })
+        .catch(function (err) { alert(err.message); });
+    });
   }
 
   function rank(c) {
@@ -463,9 +656,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
 
     var pauseBtn = el("button", { className: c.paused ? "resume" : "ghost danger", text: c.paused ? "Resume this key" : "Pause this key" });
     pauseBtn.addEventListener("click", function () {
-      busy(pauseBtn, function () {
-        return setPause({ kind: "credential", id: c.id }, !c.paused).catch(function (e) { say(result, "bad", e.message); });
-      });
+      busy(pauseBtn, function () { return pauseScope({ kind: "credential", id: c.id }, !c.paused, result); });
     });
     var manageLink = c.manageUrl
       ? el("p", { className: "hint" }, [
@@ -604,20 +795,17 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     var rows = el("div", { className: "row" });
     if (p.unreadable || p.all) {
       var resumeAll = el("button", { className: "resume", text: "Resume all access" });
-      resumeAll.addEventListener("click", function () {
-        if (!confirm("Resume access for every agent that is not paused individually?")) return;
-        busy(resumeAll, function () { return setPause({ kind: "all" }, false); });
-      });
+      resumeAll.addEventListener("click", function () { busy(resumeAll, function () { return pauseAll(false); }); });
       rows.appendChild(resumeAll);
     }
     Object.keys(p.agents).forEach(function (id) {
       var b = el("button", { text: "Resume agent " + id });
-      b.addEventListener("click", function () { busy(b, function () { return setPause({ kind: "agent", id: id }, false); }); });
+      b.addEventListener("click", function () { busy(b, function () { return pauseScope({ kind: "agent", id: id }, false, null); }); });
       rows.appendChild(b);
     });
     Object.keys(p.credentials).forEach(function (id) {
       var b = el("button", { text: "Resume key " + id });
-      b.addEventListener("click", function () { busy(b, function () { return setPause({ kind: "credential", id: id }, false); }); });
+      b.addEventListener("click", function () { busy(b, function () { return pauseScope({ kind: "credential", id: id }, false, null); }); });
       rows.appendChild(b);
     });
     lines.push(rows);
@@ -631,7 +819,7 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     state.agents.forEach(function (a) {
       var paused = !!state.pause.agents[a.id];
       var btn = el("button", { className: paused ? "resume" : "ghost danger", text: paused ? "Resume" : "Pause" });
-      btn.addEventListener("click", function () { busy(btn, function () { return setPause({ kind: "agent", id: a.id }, !paused); }); });
+      btn.addEventListener("click", function () { busy(btn, function () { return pauseScope({ kind: "agent", id: a.id }, !paused, null); }); });
       var granted = state.credentials.filter(function (c) { return c.grantedTo.indexOf(a.id) !== -1; }).length;
       holder.appendChild(el("div", { className: "agent-row" }, [
         el("div", {}, [
@@ -906,12 +1094,14 @@ button.resume { background: var(--ok); color: #ffffff; border-color: var(--ok); 
     });
   });
 
-  // One click pauses everything; resuming asks first.
+  // The header switch: type PAUSE to pause everything, RESUME to resume it.
   document.getElementById("panic").addEventListener("click", function (e) {
     var button = e.target;
+    if (!state) return;
     var paused = !!state.pause.all || state.pause.unreadable;
-    if (paused && !confirm("Resume access for every agent that is not paused individually?")) return;
-    busy(button, function () { return setPause({ kind: "all" }, !paused).catch(function (err) { alert(err.message); }); });
+    // The button is disabled while the dialog is open, so focus is put back
+    // here once it is enabled again rather than by the dialog itself.
+    busy(button, function () { return pauseAll(!paused); }).then(function () { button.focus(); });
   });
 
   document.getElementById("connectAgent").addEventListener("change", renderConnect);

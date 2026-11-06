@@ -41,8 +41,14 @@ Operator controls added around that boundary, and what they trust:
   a file that exists but cannot be read or parsed pauses everything, so a
   corrupted switch never silently re-opens access. The operator's typed reason
   is never relayed to the agent or written to the audit; only the scope is.
-  Anyone who can write the policy directory can pause or resume, which is the
-  same trust as editing the policy.
+  Every pause and resume is audited (scope, direction, source, time).
+  Resuming never deletes the file: it writes an explicit resume record, and a
+  running broker that saw a pause vanish without one keeps the pause and
+  audits `PAUSE_TAMPER`. The typed `PAUSE` and `RESUME` words in the key
+  manager guard against accidents, not attackers. Anyone who can write the
+  policy directory can pause or resume, which is the same trust as editing the
+  policy; a hostile same-user process can forge a valid file, and only the
+  secure-launch profile below prevents that.
 - **Hot reload (opt-in, `BROKER_HOT_RELOAD=1`).** A marker file written by the
   key manager makes a running broker rebuild its policy and secrets. It trusts
   whoever can write the policy directory, exactly as start-up does. A reload
