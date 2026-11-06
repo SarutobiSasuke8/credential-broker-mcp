@@ -43,3 +43,20 @@ jobs:
         env:
           PLATFORM_RESULT: ${{ needs.platform-check.result }}
         run: test "$PLATFORM_RESULT" = success
+
+  # Report floating runtime references (unpinned base images, engines.node
+  # ranges, action tags, git deps without a commit SHA). Report mode: warns and
+  # writes a step summary, never fails. Flip to failing with `--strict`.
+  # See docs/runtime-pins.md.
+  pin-check:
+    name: pin-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Report floating references
+        run: node scripts/pin-check.mjs
