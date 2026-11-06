@@ -47,6 +47,23 @@ reload paths, all fixed here:
 
 ### Added
 
+- Key manager: an **Add agent** drawer on the Agents page creates a policy
+  agent (id, display name, enabled, which APIs it may read). The agent is
+  deny-by-default and the edit goes through the same validated policy-save
+  path as New key, with the backup and the hot-reload marker. New
+  `POST /api/agent` endpoint; no secret is involved.
+- Key manager: the page links now sit in the header bar itself, next to
+  the brand and search, with the status chip, pause control and New key on
+  the right; below 1200px they fold into a menu button.
+
+### Fixed
+
+- Key manager: the Keys page said "No keys yet" while listing saved keys
+  below it. "No keys yet" now appears only when nothing is saved anywhere.
+  Keys the keychain holds that no API uses are called "Not connected to an
+  agent yet", with one line saying what that means and a Connect to an API
+  action; the Overview tiles, attention list and the header chip ("No agent
+  access yet" when no agent can reach anything) describe them the same way.
 - Key manager redesign. A sticky header with global search (`/` and
   `Ctrl+K`, grouped results, arrow keys and Enter), a New key button that
   opens a side drawer with a searchable provider picker, the pause control
