@@ -251,13 +251,21 @@ This opens a local page in your browser where you:
   and are tested straight away; anything else is stored only. Values are
   read by the key manager process and never sent to the page. Wallet keys
   are flagged and never offered as APIs. Original copies are not touched.
+- **Add an agent** (Agents page): id, display name, enabled, and which
+  APIs it may read. A new agent starts with no access at all; only the
+  APIs you tick become read grants. No key is involved.
 - **Copy the `claude mcp add` command** that registers the broker for an
   agent with absolute paths filled in (Settings page).
 
-The page is a small site: a sticky header with search (`/` or `Ctrl+K`),
-a **New key** button, the pause control and a status chip, and pages for
-Overview, Keys, Agents, Approvals, Activity (the content-free audit log,
-with filters and CSV export), Import and Settings. It follows your system's
+A key saved in the keychain that no API in the policy uses is listed on
+the Keys page under **Not connected to an agent yet**, with a
+**Connect to an API** action; no agent can use it until then.
+
+The page is a small site: a sticky header with the page links (Overview,
+Keys, Agents, Approvals, Activity, Import, Settings; a menu button on
+narrow screens), search (`/` or `Ctrl+K`), a **New key** button, the
+pause control and a status chip. Activity is the content-free audit log,
+with filters and CSV export. It follows your system's
 light or dark theme, works with the keyboard alone, and is served entirely
 by the key manager on loopback: no external script, style, font or image.
 

@@ -211,6 +211,53 @@ export function parseLaunchFragment(hash: string): { token: string; prefill: unk
   return { token: /^[0-9a-f]{64}$/u.test(token) ? token : "", prefill };
 }
 
+// ---- what the Keys page and the header say about the keys -------------------
+
+/**
+ * A key the keychain holds that no API in the policy uses. It is saved, but no
+ * agent can use it until it is connected to an API. Every piece of copy that
+ * mentions these keys comes from here, so a key is never called "missing" in
+ * one place and "present" in another.
+ */
+export const UNCONNECTED_TITLE = "Not connected to an agent yet";
+export const UNCONNECTED_PILL = "Not connected";
+
+export function unconnectedDetail(keychain: string | null): string {
+  return `Saved in ${keychain ?? "the keychain"}, but no API in the policy uses it, so no agent can use it.`;
+}
+
+export type KeysEmptyKind = "none" | "unconnected" | "no-apis" | "filtered";
+
+/**
+ * What the Keys page shows when its table has no rows.
+ * - "none": nothing anywhere, invite the first key.
+ * - "unconnected": no API in the policy but keys are saved; point at them.
+ * - "no-apis": a policy exists without APIs and nothing is saved.
+ * - "filtered": there are APIs, the current filter hides them all.
+ */
+export function keysEmptyState(counts: { policyExists: boolean; credentials: number; unconnected: number; visible: number }): KeysEmptyKind | null {
+  if (counts.visible > 0) return null;
+  if (counts.credentials > 0) return "filtered";
+  if (counts.unconnected > 0) return "unconnected";
+  return counts.policyExists ? "no-apis" : "none";
+}
+
+export interface AccessChip {
+  kind: "live" | "partial" | "paused" | "idle";
+  label: string;
+}
+
+/**
+ * The header chip. Pause state wins; otherwise it says whether any agent can
+ * reach anything at all, so "All access live" never shows over an empty policy.
+ */
+export function accessChip(pause: { all: unknown; unreadable: boolean; active: boolean }, connectedApis: number): AccessChip {
+  if (pause.all || pause.unreadable) return { kind: "paused", label: "Paused" };
+  if (pause.active) return { kind: "partial", label: "Partly paused" };
+  if (connectedApis === 0) return { kind: "idle", label: "No agent access yet" };
+  return { kind: "live", label: "All access live" };
+}
+
 /** Sort rows by a column with a stable tiebreak on the id. */
 export function sortRows<T extends { id: string }>(rows: readonly T[], key: (row: T) => string | number | null, direction: "asc" | "desc"): T[] {
   const sign = direction === "asc" ? 1 : -1;

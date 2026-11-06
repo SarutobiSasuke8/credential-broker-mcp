@@ -54,12 +54,12 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 [hidden] { display: none !important; }
 
 /* ---- header ---- */
-.top { position: sticky; top: 0; z-index: 40; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--space-4); padding: 10px var(--space-6); background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+.top { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-6); background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; margin-right: var(--space-2); }
 .brand:hover { text-decoration: none; }
 .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; box-shadow: var(--shadow-1); }
 .logo svg { width: 17px; height: 17px; }
-.search { position: relative; max-width: 560px; justify-self: center; width: 100%; }
+.search { position: relative; flex: 1 1 260px; min-width: 220px; max-width: 460px; margin-left: auto; }
 .search-icon { position: absolute; left: 12px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
 .search input { width: 100%; padding: 9px 44px 9px 36px; border: 1px solid var(--line-2); border-radius: var(--radius-pill); background: var(--field); color: var(--ink); font: inherit; font-size: 14px; transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease); }
 .search input:focus-visible { border-color: var(--accent); box-shadow: var(--focus); border-radius: var(--radius-pill); }
@@ -72,18 +72,20 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 .results .hit .t { font-weight: 600; white-space: nowrap; }
 .results .hit .s { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .empty { padding: 12px; color: var(--muted); font-size: 14px; }
-.top-actions { display: flex; align-items: center; gap: var(--space-2); justify-self: end; }
+.top-actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .chip.live { background: var(--ok-bg); color: var(--ok); }
 .chip.paused { background: var(--bad-bg); color: var(--bad); }
 .chip.partial { background: var(--warn-bg); color: var(--warn); }
+.chip.idle { background: var(--bg-2); color: var(--muted); }
 
-/* ---- tabs ---- */
-.tabs { display: flex; gap: 2px; padding: 6px var(--space-6) 0; border-bottom: 1px solid var(--line); background: var(--bg); overflow-x: auto; scrollbar-width: none; }
-.tabs a { padding: 10px 12px; color: var(--muted); font-weight: 550; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color var(--fast) var(--ease); }
-.tabs a:hover { color: var(--ink); text-decoration: none; }
-.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+/* ---- navigation, in the header bar ---- */
+.nav { display: flex; gap: 2px; flex: none; }
+.nav a { padding: 7px 10px; border-radius: var(--radius-pill); color: var(--muted); font-weight: 550; font-size: 14px; white-space: nowrap; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.nav a:hover { color: var(--ink); background: var(--bg-2); text-decoration: none; }
+.nav a[aria-current="page"] { color: var(--accent-soft-ink); background: var(--accent-soft); }
+.btn.menu { display: none; }
 
 /* ---- layout ---- */
 .banners { max-width: 1120px; margin: 0 auto; padding: var(--space-4) var(--space-6) 0; display: grid; gap: var(--space-3); }
@@ -91,14 +93,15 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 .page { max-width: 1120px; margin: 0 auto; padding: var(--space-6) var(--space-6) var(--space-12); }
 .page:focus { box-shadow: none; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); }
-.page-head .lede { color: var(--muted); font-size: 14.5px; margin-top: 4px; max-width: 64ch; }
+.page-head > div { min-width: 0; }
+.page-head .lede { color: var(--muted); font-size: 14.5px; margin-top: 4px; max-width: 64ch; overflow-wrap: anywhere; }
 .stack { display: grid; gap: var(--space-4); }
 .cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--space-4); align-items: start; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
 .card-body { padding: var(--space-5); }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--line); }
 .card-head h2 { font-size: 15.5px; }
-.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); margin-bottom: var(--space-4); }
+.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); margin-bottom: var(--space-4); }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); box-shadow: var(--shadow-1); display: grid; gap: 2px; cursor: pointer; transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease); color: var(--ink); }
 .tile:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); text-decoration: none; }
 .tile .n { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -238,14 +241,31 @@ table.plain tbody tr:hover { background: transparent; }
 }
 
 /* ---- responsive ---- */
+/* Between 1200px and 1360px the brand keeps its mark only, so the page links,
+   search and actions all fit on one bar. */
+@media (max-width: 1360px) {
+  .brand-name { display: none; }
+  .search { min-width: 180px; }
+}
+/* Below 1200px the page links fold into a menu button beside the brand; the
+   menu drops down under the header and keeps the same links and aria-current. */
+@media (max-width: 1200px) {
+  .brand-name { display: inline; }
+  .btn.menu { display: inline-flex; }
+  .btn.menu[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+  .nav { display: none; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-4) var(--space-3); background: var(--panel); border-bottom: 1px solid var(--line); box-shadow: var(--shadow-2); }
+  .nav.open { display: flex; animation: fade var(--fast) var(--ease); }
+  .nav a { padding: 10px 12px; font-size: 15px; }
+}
 @media (max-width: 920px) {
-  .top { grid-template-columns: auto 1fr; grid-template-areas: "brand actions" "search search"; row-gap: 8px; }
-  .brand { grid-area: brand; } .search { grid-area: search; max-width: none; } .top-actions { grid-area: actions; }
+  .top { flex-wrap: wrap; row-gap: 8px; }
+  .search { flex-basis: 100%; max-width: none; margin-left: 0; order: 10; }
+  .top-actions { margin-left: auto; }
   .tiles { grid-template-columns: repeat(2, 1fr); }
   .cols { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .top, .tabs, .page, .banners { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .top, .page, .banners { padding-left: var(--space-4); padding-right: var(--space-4); }
   .brand-name { display: none; }
   .top-actions .btn.panic, .top-actions .btn.primary { padding: 8px 10px; font-size: 13px; }
   .top-actions .chip { display: none; }
