@@ -139,6 +139,7 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
     <button class="ghost" id="close">Close</button>
   </header>
 
+  <div id="requestBanner"></div>
   <div id="banner"></div>
   <div class="stats" id="stats"></div>
 
@@ -250,7 +251,19 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
 <script nonce="${nonce}">
 (function () {
   "use strict";
-  var token = location.hash.slice(1);
+  // The fragment is "<token>" or "<token>.<request>". The request is an agent's
+  // key request, pre-validated by the server; it is only ever shown as text.
+  var hashParts = location.hash.slice(1).split(".");
+  var token = hashParts[0];
+  var prefill = null;
+  if (hashParts[1]) {
+    try {
+      var bin = atob(hashParts[1].replace(/-/g, "+").replace(/_/g, "/"));
+      var bytes = new Uint8Array(bin.length);
+      for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+      prefill = JSON.parse(new TextDecoder().decode(bytes));
+    } catch (ignore) { prefill = null; }
+  }
   history.replaceState(null, "", location.pathname);
   var state = null;
   var filter = "all";
@@ -589,6 +602,40 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
   }
 
   var form = document.getElementById("add");
+
+  function applyPrefill() {
+    if (!prefill || typeof prefill.id !== "string") return;
+    var p = prefill;
+    prefill = null;
+    var holder = document.getElementById("requestBanner");
+    holder.replaceChildren(el("div", { className: "banner warn", role: "alert" }, [
+      el("strong", { text: String(p.requestedBy) + " asked for a key called " + p.id + "." }),
+      el("div", { text: p.reason ? "Reason given: " + p.reason : "No reason given." }),
+      el("div", { className: "hint", text: "An agent made this request. Check the details before you paste a key. Nothing is added until you press the button, and you choose who can use it." })
+    ]));
+    var existing = state.credentials.find(function (c) { return c.id === p.id; });
+    if (existing) {
+      var field = document.querySelector('input[aria-label="API key for ' + p.id + '"]');
+      if (field) {
+        var details = field.closest("details");
+        if (details) details.setAttribute("open", "");
+        field.scrollIntoView({ behavior: "smooth", block: "center" });
+        field.focus();
+      }
+      return;
+    }
+    form.id.value = p.id;
+    if (p.preset) {
+      form.description.value = p.preset.label;
+      form.baseUrl.value = p.preset.baseUrl;
+      form.kind.value = p.preset.kind;
+      syncKind();
+      if (p.preset.paramName) form.paramName.value = p.preset.paramName;
+    }
+    document.getElementById("addPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+    (p.preset ? form.value : form.baseUrl).focus();
+  }
+
   function syncKind() {
     var kind = form.kind.value;
     document.getElementById("paramWrap").classList.toggle("hidden", kind !== "header" && kind !== "query");
@@ -769,7 +816,7 @@ details.panel > summary { cursor: pointer; font-weight: 650; font-size: 16px; }
   if (!token) {
     document.getElementById("banner").appendChild(el("div", { className: "banner bad", text: "Missing session token. Open the link printed by npm run keys." }));
   } else {
-    refresh();
+    refresh().then(applyPrefill);
   }
 })();
 </script>

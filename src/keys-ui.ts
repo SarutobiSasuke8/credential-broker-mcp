@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { scanForKeys } from "./import-scan.js";
+import { findPresetById, scanForKeys } from "./import-scan.js";
 import { effectiveCredentialIds } from "./grants.js";
 import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
@@ -534,6 +534,40 @@ const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/import/apply": applyImport,
 };
 
+/**
+ * An agent's request to add a key (broker_request_credential) reaches this
+ * process as untrusted JSON in the environment. Only a validated name, a short
+ * reason and the requester's name are kept; the address and key style come
+ * from the known-provider table, never from the agent. The result rides in
+ * the URL fragment, which the browser never sends anywhere.
+ */
+const requestSchema = z.object({
+  credentialId: ID,
+  reason: z.string().trim().max(200),
+  requestedBy: ID,
+  provider: ID.optional(),
+});
+
+function buildPrefill(): string | null {
+  const raw = process.env.BROKER_KEYS_REQUEST;
+  if (!raw) return null;
+  try {
+    const request = requestSchema.parse(JSON.parse(raw));
+    const preset = request.provider ? findPresetById(request.provider) : null;
+    const prefill = {
+      id: request.credentialId,
+      reason: request.reason,
+      requestedBy: request.requestedBy,
+      preset: preset
+        ? { label: preset.label, baseUrl: preset.baseUrl, kind: preset.kind, paramName: preset.paramName ?? null }
+        : null,
+    };
+    return Buffer.from(JSON.stringify(prefill), "utf8").toString("base64url");
+  } catch {
+    return null;
+  }
+}
+
 const server = createServer((req, res) => {
   void (async () => {
     touch();
@@ -604,7 +638,8 @@ server.on("error", (error: NodeJS.ErrnoException) => {
 
 server.listen(requestedPort, "127.0.0.1", () => {
   const { port } = server.address() as AddressInfo;
-  const url = `http://127.0.0.1:${port}/#${token}`;
+  const prefill = buildPrefill();
+  const url = `http://127.0.0.1:${port}/#${token}${prefill ? `.${prefill}` : ""}`;
   console.log("Credential Broker key manager");
   console.log(`Policy: ${policyFile}`);
   console.log(`Keys:   ${store ? "Windows Credential Manager" : "no keychain on this platform; use env vars"}`);

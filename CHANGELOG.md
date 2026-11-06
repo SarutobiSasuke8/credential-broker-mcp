@@ -10,6 +10,16 @@ unreleased work on `main` towards a first `v0.1.0`.
 
 ### Added
 
+- Opt-in `broker_request_credential` tool (`BROKER_ALLOW_KEY_REQUESTS=1`):
+  an agent can ask the operator for a key. The broker opens the key manager
+  in the operator's browser, pre-filled with the name, the agent's reason and
+  a provider from the broker's own table. The agent never sees the page
+  address, token or entered value, cannot choose the base URL, and is rate
+  limited (one per credential per 10 minutes, five an hour). Adds an itch.io
+  provider preset.
+- Key manager redesign: Add a key first, a summary strip, a searchable and
+  filterable key list sorted by urgency, and optional expiry dates and notes
+  per key kept in `key-notes.json` beside the policy.
 - Clean-tarball stdio proof with a synthetic loopback API, checking
   principal grants, rejected requests, redacted responses, metadata-only
   output, approval revocation and audit contents. CI covers Windows/Linux

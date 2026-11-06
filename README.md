@@ -229,6 +229,34 @@ the stored key. The page listens on 127.0.0.1 only, needs a per-run token
 from the printed link, and closes after 30 minutes idle. On other
 platforms, set each credential's `env_var` instead.
 
+### Expiry dates and notes
+
+Each key can carry an expiry date and a free-text note (where it was created,
+how to rotate it). They are kept in `key-notes.json` beside the policy file
+(override with `BROKER_KEY_NOTES_FILE`), never in the policy and never with the
+secret. Keys that are expired or expire within 30 days raise a banner, sort
+first, and show a badge on their card. Nothing in the broker engine reads this
+file, so a date never blocks a request; it is a reminder for you.
+
+### Letting an agent ask for a key
+
+Set `BROKER_ALLOW_KEY_REQUESTS=1` on a broker process to give that agent the
+`broker_request_credential` tool. The agent supplies a lowercase name, a short
+reason and, optionally, a known provider id (for example `github`, `openai`,
+`itch`). The broker then opens the key manager in your browser, pre-filled with
+the name and the reason, with a banner saying which agent asked.
+
+- The agent never receives the page address, the session token or anything you
+  type. The tool result says only that a window opened.
+- The base URL and key style come from the broker's own table of known
+  providers, never from the agent. An unknown provider leaves them blank for you
+  to fill in, so an agent cannot steer a key to a host of its choosing.
+- Nothing is added until you press the button, and you choose who may use it.
+- Requests are limited to one per credential per 10 minutes and five an hour per
+  process, and each one writes a content-free audit line.
+- The broker loads keys when it starts, so restart the MCP client after saving.
+  The tool is off by default.
+
 ## Running
 
 ```bash
