@@ -894,8 +894,8 @@ function renderOverview(): Child[] {
   return [
     el("div", { className: "overview-intro" }, [
       el("div", {}, [
-        el("h1", { text: "Access overview" }),
-        el("p", { text: "Grant agents access to specific API operations and keep the keys with the broker." }),
+        el("h1", { text: "Overview" }),
+        el("p", { text: "Manage API keys, agent access and approval requests." }),
         quickForm,
         detailedAdd,
       ]),
