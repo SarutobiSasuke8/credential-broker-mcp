@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ago, expiryText, filterActivity, groupHits, isoPlusDays, parseLaunchFragment, parseRoute, rankSearch, routeHash, sortRows, toCsv, urgency } from "../src/ui/logic.js";
+import { accessChip, ago, expiryText, filterActivity, groupHits, isoPlusDays, keysEmptyState, parseLaunchFragment, parseRoute, rankSearch, routeHash, sortRows, toCsv, unconnectedDetail, urgency } from "../src/ui/logic.js";
 
 import type { ActivityRecord, SearchItem } from "../src/ui/logic.js";
 
@@ -86,6 +86,26 @@ void test("the launch fragment yields the token and a decoded prefill, and rejec
   assert.deepEqual(parseLaunchFragment(`#${token}`), { token, prefill: null });
   assert.deepEqual(parseLaunchFragment(`#${token}.not-base64-json`), { token, prefill: null });
   assert.deepEqual(parseLaunchFragment("#/keys"), { token: "", prefill: null });
+});
+
+void test("the Keys page says No keys yet only when there is nothing anywhere, and points at unconnected keys otherwise", () => {
+  assert.equal(keysEmptyState({ policyExists: false, credentials: 0, unconnected: 0, visible: 0 }), "none");
+  assert.equal(keysEmptyState({ policyExists: true, credentials: 0, unconnected: 0, visible: 0 }), "no-apis");
+  assert.equal(keysEmptyState({ policyExists: false, credentials: 0, unconnected: 7, visible: 0 }), "unconnected", "saved keys are never called no keys");
+  assert.equal(keysEmptyState({ policyExists: true, credentials: 0, unconnected: 1, visible: 0 }), "unconnected");
+  assert.equal(keysEmptyState({ policyExists: true, credentials: 3, unconnected: 2, visible: 0 }), "filtered", "a filter that hides every API is not an empty policy");
+  assert.equal(keysEmptyState({ policyExists: true, credentials: 3, unconnected: 2, visible: 3 }), null);
+  assert.equal(unconnectedDetail("Windows Credential Manager"), "Saved in Windows Credential Manager, but no API in the policy uses it, so no agent can use it.");
+  assert.equal(unconnectedDetail(null), "Saved in the keychain, but no API in the policy uses it, so no agent can use it.");
+});
+
+void test("the header chip reports pause first, then whether any agent can reach anything", () => {
+  const live = { all: null, unreadable: false, active: false };
+  assert.deepEqual(accessChip(live, 0), { kind: "idle", label: "No agent access yet" });
+  assert.deepEqual(accessChip(live, 2), { kind: "live", label: "All access live" });
+  assert.deepEqual(accessChip({ ...live, active: true }, 2), { kind: "partial", label: "Partly paused" });
+  assert.deepEqual(accessChip({ all: { at: "x", reason: "" }, unreadable: false, active: true }, 2), { kind: "paused", label: "Paused" });
+  assert.deepEqual(accessChip({ all: null, unreadable: true, active: true }, 0), { kind: "paused", label: "Paused" });
 });
 
 void test("rows sort by any column in either direction with nulls last and a stable id tiebreak", () => {

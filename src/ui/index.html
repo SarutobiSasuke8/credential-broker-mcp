@@ -11,10 +11,22 @@
 <body>
 <a class="skip" href="#page">Skip to content</a>
 <header class="top" id="top">
+  <button id="menuBtn" class="btn icon menu" type="button" aria-label="Pages" aria-expanded="false" aria-controls="tabs">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
   <a class="brand" href="#/overview" aria-label="Credential Broker, overview">
     <img class="logo" src="/ui/broker-mark.svg" alt="" width="32" height="32">
     <span class="brand-name">Credential Broker</span>
   </a>
+  <nav class="nav" aria-label="Pages" id="tabs">
+    <a href="#/overview" data-page="overview">Overview</a>
+    <a href="#/keys" data-page="keys">Keys</a>
+    <a href="#/agents" data-page="agents">Agents</a>
+    <a href="#/approvals" data-page="approvals">Approvals</a>
+    <a href="#/activity" data-page="activity">Activity</a>
+    <a href="#/import" data-page="import">Import</a>
+    <a href="#/settings" data-page="settings">Settings</a>
+  </nav>
   <div class="search" id="searchWrap">
     <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <input id="search" type="search" placeholder="Search keys, agents, approvals, providers" aria-label="Search keys, agents, approvals and providers" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="searchResults" aria-autocomplete="list">
@@ -30,15 +42,6 @@
     </button>
   </div>
 </header>
-<nav class="tabs" aria-label="Pages" id="tabs">
-  <a href="#/overview" data-page="overview">Overview</a>
-  <a href="#/keys" data-page="keys">Keys</a>
-  <a href="#/agents" data-page="agents">Agents</a>
-  <a href="#/approvals" data-page="approvals">Approvals</a>
-  <a href="#/activity" data-page="activity">Activity</a>
-  <a href="#/import" data-page="import">Import</a>
-  <a href="#/settings" data-page="settings">Settings</a>
-</nav>
 <div id="banners" class="banners"></div>
 <main id="page" class="page" tabindex="-1"></main>
 <div id="drawerHost"></div>

@@ -19,7 +19,7 @@ import { reloadMarkerPath, touchReloadMarker } from "./reload.js";
 import { readAuditLines, summarizeUsage, USAGE_WINDOW_DAYS } from "./usage.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
 import { listPresets } from "./import-scan.js";
-import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
+import { addAgentToPolicy, addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
 import { parseBrokerPolicy } from "./policy.js";
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -108,6 +108,13 @@ const addCredentialSchema = z.object({
   })).max(100).optional(),
   groupIds: z.array(ID).max(100).optional(),
   groupQueryParams: z.array(QUERY_KEY).max(50).optional(),
+});
+const addAgentSchema = z.object({
+  id: ID,
+  displayName: z.string().max(100).default(""),
+  enabled: z.boolean().default(true),
+  // Read access only, and nothing unless listed. Same rule as New key.
+  reads: z.array(z.object({ credentialId: ID, queryParams: z.array(QUERY_KEY).max(50).default([]) })).max(100).default([]),
 });
 
 // ---------------------------------------------------------------------------
@@ -477,6 +484,23 @@ async function addCredential(body: unknown): Promise<object> {
   return { ok: true, envVar: envVarFor(input.id) };
 }
 
+/**
+ * Adds a policy agent with no grants beyond the reads chosen. Goes through the
+ * same policy-save path as adding a key (validated by parseBrokerPolicy, atomic
+ * write with a backup, reload marker). Never touches a secret.
+ */
+async function addAgent(body: unknown): Promise<object> {
+  const input = addAgentSchema.parse(body);
+  let text: string;
+  try {
+    text = addAgentToPolicy(await readPolicyText(), { id: input.id, displayName: input.displayName.trim(), enabled: input.enabled, reads: input.reads });
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
+  await writePolicy(text);
+  return { ok: true, agentId: input.id, reads: input.reads.length };
+}
+
 type Probeable = Pick<CredentialSpec, "baseUrl" | "origin" | "kind" | "paramName">;
 
 /**
@@ -725,6 +749,7 @@ const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/approvals/create": createApprovalEntry,
   "POST /api/approvals/revoke": revokeApprovalEntry,
   "POST /api/credential": addCredential,
+  "POST /api/agent": addAgent,
   "POST /api/test": testCredential,
   "POST /api/state": () => buildState(),
   "POST /api/activity": () => recentActivity(),

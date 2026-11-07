@@ -8,8 +8,13 @@
  * the address bar. From then on the fragment carries the hash route.
  */
 import {
+  accessChip,
   ago,
   EMPTY_FILTER,
+  keysEmptyState,
+  UNCONNECTED_PILL,
+  UNCONNECTED_TITLE,
+  unconnectedDetail,
   expiryText,
   filterActivity,
   groupHits,
@@ -523,7 +528,7 @@ function searchItems(): SearchItem[] {
   for (const c of state.credentials) {
     items.push({ kind: "key", title: c.id, subtitle: [c.description, c.baseUrl].filter(Boolean).join(" \u00b7 "), page: "keys", item: c.id, keywords: `${c.userNote} ${c.grantedTo.join(" ")}` });
   }
-  for (const k of state.storedOnly) items.push({ kind: "key", title: k.id, subtitle: `Stored only${k.note ? ` \u00b7 ${k.note}` : ""}`, page: "keys", item: k.id });
+  for (const k of state.storedOnly) items.push({ kind: "key", title: k.id, subtitle: `${UNCONNECTED_TITLE}${k.note ? ` \u00b7 ${k.note}` : ""}`, page: "keys", item: k.id });
   for (const a of state.agents) items.push({ kind: "agent", title: a.id, subtitle: a.displayName !== a.id ? a.displayName : "Agent", page: "agents", item: a.id });
   for (const a of state.approvals) items.push({ kind: "approval", title: a.id, subtitle: `${a.agentId} \u00b7 ${a.credentialId} \u00b7 ${a.operationId} \u00b7 ${a.state}`, page: "approvals", item: a.id });
   for (const p of state.providers) items.push({ kind: "provider", title: p.label, subtitle: p.baseUrl, page: "keys", item: null, keywords: p.id });
@@ -654,10 +659,12 @@ function renderHeader(): void {
   if (!state) return;
   const p = state.pause;
   const allPaused = !!p.all || p.unreadable;
-  const partial = !allPaused && p.active;
+  // An API counts as reachable when it has a key and at least one agent may use it.
+  const reachable = state.credentials.filter((c) => c.source !== "missing" && c.grantedTo.length > 0).length;
+  const chipState = accessChip(p, reachable);
   const chip = byId("statusChip");
-  chip.className = `chip ${allPaused ? "paused" : partial ? "partial" : "live"}`;
-  chip.textContent = allPaused ? "Paused" : partial ? "Partly paused" : "All access live";
+  chip.className = `chip ${chipState.kind}`;
+  chip.textContent = chipState.label;
   const pauseBtn = byId<HTMLButtonElement>("pauseBtn");
   pauseBtn.textContent = allPaused ? "Resume all access" : "Pause all access";
   pauseBtn.className = `btn ${allPaused ? "resume" : "panic"}`;
@@ -665,6 +672,34 @@ function renderHeader(): void {
     if (a.dataset["page"] === current.page) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
+}
+
+/**
+ * On narrow screens the page links fold into a menu button. The nav element
+ * and its links are the same at every width; only their display changes, so
+ * aria-current and the hash routes stay as they are.
+ */
+function setupMenu(): void {
+  const button = byId<HTMLButtonElement>("menuBtn");
+  const nav = byId("tabs");
+  const setOpen = (open: boolean): void => {
+    nav.classList.toggle("open", open);
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  button.addEventListener("click", () => setOpen(!nav.classList.contains("open")));
+  nav.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("a")) setOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && nav.classList.contains("open")) {
+      setOpen(false);
+      button.focus();
+    }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (nav.classList.contains("open") && !byId("top").contains(e.target as Node)) setOpen(false);
+  });
+  window.addEventListener("hashchange", () => setOpen(false));
 }
 
 function renderBanners(): void {
@@ -796,6 +831,7 @@ function renderOverview(): Child[] {
   };
   const tiles = el("div", { className: "tiles" }, [
     tile(`${withKey} / ${s.credentials.length}`, "APIs with a key", "keys"),
+    tile(String(s.storedOnly.length), s.storedOnly.length === 1 ? "Key not connected to an agent" : "Keys not connected to an agent", "keys", s.storedOnly.length ? "warn" : ""),
     tile(String(attention.length), expired ? "Expired or expiring soon" : `Expiring within ${s.expiryWarningDays} days`, "keys", expired ? "bad" : attention.length ? "warn" : ""),
     tile(String(s.agents.length), s.agents.length === 1 ? "Agent" : "Agents", "agents"),
     tile(String(activeApprovals), "Active approvals", "approvals", activeApprovals ? "ok" : ""),
@@ -809,10 +845,11 @@ function renderOverview(): Child[] {
     items.push(attentionRow(c.id, expiryText(c).text, "keys", c.id, c.expiryState === "expired" ? "bad" : "warn", c.expiryState === "expired" ? "Expired" : "Expiring"));
   }
   for (const c of missing) items.push(attentionRow(c.id, "No key saved yet. Agents cannot use it until you paste one.", "keys", c.id, "warn", "No key"));
+  for (const k of s.storedOnly) items.push(attentionRow(k.id, unconnectedDetail(s.keychain), "keys", null, "warn", UNCONNECTED_PILL));
 
   const attentionCard = el("div", { className: "card" }, [
     el("div", { className: "card-head" }, [el("h2", { text: "Needs attention" }), el("span", { className: `pill ${items.length ? "warn" : "ok"}`, text: items.length ? String(items.length) : "All clear" })]),
-    el("div", { className: "card-body" }, items.length ? items : [el("div", { className: "empty" }, [el("strong", { text: "Nothing needs attention." }), el("span", { text: "Every key is saved and in date, and nothing is paused." })])]),
+    el("div", { className: "card-body" }, items.length ? items : [el("div", { className: "empty" }, [el("strong", { text: "Nothing needs attention." }), el("span", { text: "Every key is saved, connected and in date, and nothing is paused." })])]),
   ]);
 
   const recent = el("div", { className: "card-body", id: "recentActivity" }, [el("p", { className: "hint", text: "Loading recent activity\u2026" })]);
@@ -832,11 +869,14 @@ function renderOverview(): Child[] {
     recent,
   ]);
 
+  const quickAdd = el("button", { type: "button", className: "btn primary quick-add", text: "+ Quick add key" });
+  quickAdd.addEventListener("click", () => openNewKey({}));
   return [
     el("div", { className: "overview-intro" }, [
       el("div", {}, [
         el("h1", { text: "Access overview" }),
         el("p", { text: "Grant agents access to specific API operations and keep the keys with the broker." }),
+        quickAdd,
       ]),
       el("img", { src: "/ui/broker-routing.svg", alt: "", width: "360", height: "160" }),
     ]),
@@ -934,18 +974,28 @@ function renderKeys(): Child[] {
     el("thead", {}, [el("tr", {}, [th("Name", "name"), th("Provider", "provider"), th("Status", "status"), th("Expiry", "expiry"), th("Last used", "lastUsed", "num"), th("Agents", "agents")])]),
     tbody,
   ]);
+  // "No keys yet" is only true when there is nothing anywhere: no API in the
+  // policy and nothing saved in the keychain either.
+  const emptyKind = keysEmptyState({ policyExists: s.policyExists, credentials: s.credentials.length, unconnected: s.storedOnly.length, visible: rows.length });
   const emptyNode = (): HTMLElement => {
-    if (s.credentials.length === 0) {
-      const b = el("button", { type: "button", className: "btn primary", text: "Add your first key" });
-      b.addEventListener("click", () => openNewKey({}));
-      return el("div", { className: "empty" }, [el("strong", { text: s.policyExists ? "No APIs in the policy yet." : "No keys yet." }), el("span", { text: "Add a key and choose which agent may use it. The agent gets read access only." }), b]);
+    if (emptyKind === "filtered") {
+      const b = el("button", { type: "button", className: "btn", text: "Show all keys" });
+      b.addEventListener("click", () => {
+        keyFilter = "all";
+        render();
+      });
+      return el("div", { className: "empty" }, [el("strong", { text: "No keys match this view." }), b]);
     }
-    const b = el("button", { type: "button", className: "btn", text: "Show all keys" });
-    b.addEventListener("click", () => {
-      keyFilter = "all";
-      render();
-    });
-    return el("div", { className: "empty" }, [el("strong", { text: "No keys match this view." }), b]);
+    if (emptyKind === "unconnected") {
+      const n = s.storedOnly.length;
+      return el("div", { className: "empty" }, [
+        el("strong", { text: `No API uses your ${n === 1 ? "saved key" : `${n} saved keys`} yet.` }),
+        el("span", { text: `${n === 1 ? "It is" : "They are"} saved in ${s.keychain ?? "the keychain"}, but no API in the policy uses ${n === 1 ? "it" : "them"}, so no agent can. Connect one to an API below.` }),
+      ]);
+    }
+    const b = el("button", { type: "button", className: "btn primary", text: "Add your first key" });
+    b.addEventListener("click", () => openNewKey({}));
+    return el("div", { className: "empty" }, [el("strong", { text: emptyKind === "no-apis" ? "No APIs in the policy yet." : "No keys yet." }), el("span", { text: "Add a key and choose which agent may use it. The agent gets read access only." }), b]);
   };
   const keysCard = el("div", { className: "card" }, [rows.length ? el("div", { className: "table-wrap" }, [table]) : emptyNode()]);
 
@@ -953,15 +1003,15 @@ function renderKeys(): Child[] {
   if (s.storedOnly.length) {
     const list = el("div", { className: "list" });
     for (const k of s.storedOnly) {
-      const tr = el("div", { className: "list-row" }, [
-        el("div", {}, [el("div", { className: "name", text: k.id }), el("div", { className: "meta", text: k.note || "Housed in the keychain, not connected to an API" })]),
-        el("div", { className: "pills" }, [k.expiryState !== "none" ? expiryPill(k) : null, storedActions(k)]),
+      const tr = el("div", { className: "list-row", "data-fid": `stored-${k.id}` }, [
+        el("div", {}, [el("div", { className: "name", text: k.id }), el("div", { className: "meta", text: k.note ? `${k.note} · ${unconnectedDetail(s.keychain)}` : unconnectedDetail(s.keychain) })]),
+        el("div", { className: "pills" }, [el("span", { className: "pill warn", text: UNCONNECTED_PILL }), k.expiryState !== "none" ? expiryPill(k) : null, storedActions(k)]),
       ]);
       list.append(tr);
     }
     stored.push(
-      el("div", { className: "card" }, [
-        el("div", { className: "card-head" }, [el("h2", { text: `Stored only (${s.storedOnly.length})` }), el("span", { className: "hint", text: "No agent can use these until they are connected to an API." })]),
+      el("div", { className: "card", id: "unconnected" }, [
+        el("div", { className: "card-head" }, [el("h2", { text: `${UNCONNECTED_TITLE} (${s.storedOnly.length})` }), el("span", { className: "hint", text: unconnectedDetail(s.keychain) })]),
         el("div", { className: "card-body" }, [list]),
       ]),
     );
@@ -1313,8 +1363,10 @@ function renderAgents(): Child[] {
   if (!state) return [];
   const s = state;
   const list = el("div", { className: "list" });
+  const addAgent = el("button", { type: "button", className: "btn primary", text: "Add agent", "data-fid": "addAgent" });
+  addAgent.addEventListener("click", () => openNewAgent());
   if (!s.agents.length) {
-    list.append(el("div", { className: "empty" }, [el("strong", { text: "No agents in the policy yet." }), el("span", { text: "Add a key and tick Add a new agent to create one." })]));
+    list.append(el("div", { className: "empty" }, [el("strong", { text: "No agents in the policy yet." }), el("span", { text: "Add one here, or add a key and tick Add a new agent." })]));
   }
   for (const a of s.agents) {
     const paused = !!s.pause.agents[a.id];
@@ -1334,9 +1386,64 @@ function renderAgents(): Child[] {
     );
   }
   return [
-    pageHead("Agents", "Each agent is one broker process with its own identity. Pausing one does not touch the others; it takes effect on the next request and nothing is deleted."),
+    pageHead("Agents", "Each agent is one broker process with its own identity. Pausing one does not touch the others; it takes effect on the next request and nothing is deleted.", [addAgent]),
     el("div", { className: "card" }, [el("div", { className: "card-body" }, [list])]),
   ];
+}
+
+/**
+ * Add agent drawer. Same pattern as New key: a form in the side drawer that
+ * writes through the policy-save path. The agent starts with no grants; only
+ * the APIs ticked here become read grants (GET under the base URL). It never
+ * sees or carries a key.
+ */
+function openNewAgent(): void {
+  if (!state) return;
+  const s = state;
+  const form = el("form", { className: "stack", autocomplete: "off" });
+  const result = el("div", { className: "result", role: "status" });
+  const idInput = el("input", { name: "id", placeholder: "claude", required: true, pattern: "[a-z0-9][a-z0-9._-]{1,63}", spellcheck: "false", "aria-describedby": "agentIdHint" });
+  const displayName = el("input", { name: "displayName", placeholder: "Claude Code", maxlength: "100" });
+  const enabled = el("input", { type: "checkbox", name: "enabled", checked: true });
+  const queryParams = el("input", { name: "queryParams", placeholder: "q, limit, page" });
+
+  const reads = el("div", { className: "choices", role: "group", "aria-label": "APIs the agent may read" });
+  for (const c of s.credentials) {
+    const box = el("input", { type: "checkbox", value: c.id, "data-credential": c.id });
+    reads.append(el("label", { className: "check" }, [box, el("span", {}, [text(c.id), el("span", { className: "hint", text: ` · GET ${new URL(c.baseUrl).host}` })])]));
+  }
+  const noApis = s.credentials.length === 0 ? el("p", { className: "hint", text: "No API in the policy yet. The agent can be added now and connected to APIs later." }) : null;
+
+  form.append(
+    el("div", { className: "form-grid" }, [
+      el("label", { className: "field" }, [text("Agent id"), idInput, el("span", { className: "hint", id: "agentIdHint", text: "Lowercase letters, digits, dots and dashes. The broker is started with BROKER_AGENT_ID set to this." })]),
+      el("label", { className: "field" }, [text("Display name"), displayName]),
+      el("label", { className: "check full" }, [enabled, text("Enabled. Untick to add it now but refuse every request until you enable it in the policy.")]),
+      el("div", { className: "field full" }, [text("APIs it may read"), noApis, reads, el("span", { className: "hint", text: "Nothing is ticked by default: a new agent can reach nothing until you choose. Read access only (GET under the API's base URL); write access stays a hand-written policy decision." })]),
+      el("label", { className: "field full" }, [text("Query parameters it may use (optional)"), queryParams, el("span", { className: "hint", text: "Applies to every API ticked above. Any query parameter not listed is refused." })]),
+    ]),
+    result,
+  );
+
+  const submit = el("button", { type: "submit", className: "btn primary", text: "Add agent" });
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const qp = queryParams.value.split(",").map((x) => x.trim()).filter(Boolean);
+    const chosen = [...reads.querySelectorAll<HTMLInputElement>("input[data-credential]:checked")].map((b) => ({ credentialId: b.value, queryParams: qp }));
+    const id = idInput.value.trim();
+    void busy(submit, () =>
+      api("/api/agent", { id, displayName: displayName.value.trim(), enabled: enabled.checked, reads: chosen })
+        .then(() => {
+          closeDrawer?.();
+          toast(`Added agent ${id}${chosen.length ? ` with read access to ${chosen.length} ${chosen.length === 1 ? "API" : "APIs"}.` : " with no access yet."}`);
+          return refresh().then(() => go("agents", id));
+        })
+        .catch((err: Error) => say(result, "bad", err.message)),
+    );
+  });
+  submit.addEventListener("click", () => form.requestSubmit());
+  openDrawer("Add agent", [el("p", { className: "hint", text: "An agent is one broker process with its own identity. It gets a deny-by-default entry in the policy; no key is involved here." }), form], [submit]);
+  idInput.focus();
 }
 
 // ---- approvals -------------------------------------------------------------------------
@@ -1738,6 +1845,7 @@ function boot(): void {
     void busy(button, () => pauseAll(!paused)).then(() => button.focus());
   });
   setupSearch();
+  setupMenu();
   window.addEventListener("hashchange", onRoute);
   if (!token) {
     renderFatal("Missing session token. Open the link printed by npm run keys.");
