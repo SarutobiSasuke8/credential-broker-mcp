@@ -100,7 +100,12 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 .overview-intro h1 { font-size: clamp(27px, 4vw, 38px); line-height: 1.15; letter-spacing: -0.035em; overflow-wrap: anywhere; }
 .overview-intro p { color: var(--brand-muted); margin-top: var(--space-2); max-width: 46ch; }
 .overview-intro img { display: block; width: 100%; height: auto; }
-.overview-intro .quick-add { margin-top: var(--space-4); }
+.overview-intro .quick-add { margin-top: var(--space-4); max-width: 520px; }
+.quick-add-row { display: flex; gap: 8px; }
+.quick-add-row input { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--field); color: var(--ink); font: inherit; }
+.overview-intro .quick-add-hint { color: var(--brand-muted); margin-top: 8px; font-size: 13px; }
+.overview-intro .quick-add-detailed { margin-top: 10px; }
+@media (max-width: 400px) { .quick-add-row { flex-wrap: wrap; } .quick-add-row input { flex-basis: 100%; } }
 .stack { display: grid; gap: var(--space-4); }
 .cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }

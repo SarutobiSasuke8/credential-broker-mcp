@@ -869,14 +869,35 @@ function renderOverview(): Child[] {
     recent,
   ]);
 
-  const quickAdd = el("button", { type: "button", className: "btn primary quick-add", text: "+ Quick add key" });
-  quickAdd.addEventListener("click", () => openNewKey({}));
+  const quickValue = el("input", { type: "password", placeholder: "Paste an API key", "aria-label": "API key", autocomplete: "off", spellcheck: "false", required: true });
+  const quickSave = el("button", { type: "submit", className: "btn primary", text: "Save key" });
+  const quickResult = el("div", { className: "result", role: "status" });
+  const quickForm = el("form", { className: "quick-add", autocomplete: "off" }, [
+    el("div", { className: "quick-add-row" }, [quickValue, quickSave]),
+    el("p", { className: "quick-add-hint", text: "Saved in your keychain. Connect it to an API and agent later." }),
+    quickResult,
+  ]);
+  quickForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!quickValue.value.trim()) { say(quickResult, "bad", "Paste a key first."); return; }
+    const id = `key-${crypto.randomUUID()}`;
+    void busy(quickSave, () => api("/api/secret", { credentialId: id, value: quickValue.value })
+      .then(async () => {
+        quickValue.value = "";
+        await refresh();
+        toast("Key saved. Connect it to an API from the Keys page.");
+      })
+      .catch((error: Error) => say(quickResult, "bad", error.message)));
+  });
+  const detailedAdd = el("button", { type: "button", className: "btn quick-add-detailed", text: "Detailed setup" });
+  detailedAdd.addEventListener("click", () => openNewKey({}));
   return [
     el("div", { className: "overview-intro" }, [
       el("div", {}, [
         el("h1", { text: "Access overview" }),
         el("p", { text: "Grant agents access to specific API operations and keep the keys with the broker." }),
-        quickAdd,
+        quickForm,
+        detailedAdd,
       ]),
       el("img", { src: "/ui/broker-routing.svg", alt: "", width: "360", height: "160" }),
     ]),
