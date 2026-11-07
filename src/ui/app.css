@@ -81,9 +81,12 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 .chip.partial { background: var(--warn-bg); color: var(--warn); }
 .chip.idle { background: var(--bg-2); color: var(--muted); }
 
-/* ---- navigation, in the header bar ---- */
-.nav { display: flex; gap: 2px; flex: none; }
-.nav a { padding: 7px 10px; border-radius: var(--radius-pill); color: var(--muted); font-weight: 550; font-size: 14px; white-space: nowrap; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
+/* ---- workspace navigation ---- */
+.nav { display: flex; gap: var(--space-3); flex: none; }
+.nav-group { display: grid; gap: 3px; }
+.nav-label { padding: 4px 12px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; }
+.nav a svg { width: 18px; height: 18px; flex: none; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-pill); color: var(--muted); font-weight: 550; font-size: 14px; white-space: nowrap; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
 .nav a:hover { color: var(--ink); background: var(--bg-2); text-decoration: none; }
 .nav a[aria-current="page"] { color: var(--accent-soft-ink); background: var(--accent-soft); }
 .btn.menu { display: none; }
@@ -112,7 +115,7 @@ kbd { border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 
 .card-body { padding: var(--space-5); }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--line); }
 .card-head h2 { font-size: 15.5px; }
-.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); margin-bottom: var(--space-4); }
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); box-shadow: var(--shadow-1); display: grid; gap: 2px; cursor: pointer; transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease); color: var(--ink); }
 .tile:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); text-decoration: none; }
 .tile .n { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -265,7 +268,7 @@ table.plain tbody tr:hover { background: transparent; }
   .btn.menu { display: inline-flex; }
   .btn.menu[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
   .nav { display: none; position: absolute; top: 100%; left: 0; right: 0; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-4) var(--space-3); background: var(--panel); border-bottom: 1px solid var(--line); box-shadow: var(--shadow-2); }
-  .nav.open { display: flex; animation: fade var(--fast) var(--ease); }
+  .nav.open { display: flex; gap: var(--space-3); z-index: 60; max-height: calc(100dvh - 120px); overflow-y: auto; animation: fade var(--fast) var(--ease); }
   .nav a { padding: 10px 12px; font-size: 15px; }
 }
 @media (max-width: 920px) {
@@ -303,15 +306,21 @@ body { background: var(--canvas-warm); }
 @media (min-width: 1201px) {
   body { padding-left: 230px; }
   body::before { content: ""; position: fixed; inset: 0 auto 0 0; width: 230px; background: var(--rail); z-index: 39; }
-  .top { min-height: 70px; padding-left: var(--space-8); }
+  .top { min-height: 70px; padding-left: var(--space-8); backdrop-filter: none; }
   .brand { position: fixed; z-index: 42; top: 22px; left: 20px; color: var(--rail-ink); margin: 0; }
   .brand-name { display: inline; font-size: 15px; }
-  .nav { display: flex; position: fixed; top: 84px; bottom: 20px; left: 12px; width: 206px; z-index: 41; flex-direction: column; gap: 5px; }
+  .nav { display: flex; position: fixed; top: 84px; bottom: 20px; left: 12px; width: 206px; z-index: 41; flex-direction: column; gap: var(--space-4); overflow-y: auto; }
   .nav a { color: var(--rail-muted); border-radius: var(--radius-sm); padding: 11px 14px; }
   .nav a:hover { background: var(--rail-active); color: var(--rail-ink); }
   .nav a[aria-current="page"] { background: var(--rail-active); color: var(--rail-ink); }
-  .nav a[data-page="settings"] { margin-top: auto; }
+  .nav-label { color: var(--rail-muted); }
+  .nav-tools { margin-top: auto; padding-top: var(--space-3); border-top: 1px solid var(--rail-active); }
   .search { margin-left: 0; }
   .top-actions { margin-left: auto; }
   .page, .banners { max-width: 1260px; }
 }
+
+/* Keep long labels and status cards inside the available viewport. */
+.tile { min-width: 0; overflow-wrap: anywhere; }
+.quick-add-row { min-width: 0; }
+@media (max-width: 1200px) { .top { backdrop-filter: none; } }
