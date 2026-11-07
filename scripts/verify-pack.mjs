@@ -12,6 +12,7 @@ const ALLOWED = [
   /^config\/broker\.example\.yaml$/u,
   /^dist\/src\/(ui\/)?[a-z-]+\.(js|d\.ts|js\.map|d\.ts\.map)$/u,
   /^dist\/ui\/[a-z-]+\.(js|css|html)$/u,
+  /^dist\/ui\/broker-(mark|routing)\.svg$/u,
 ];
 
 const REQUIRED = [
@@ -26,6 +27,8 @@ const REQUIRED = [
   "dist/ui/index.html",
   "dist/ui/app.js",
   "dist/ui/app.css",
+  "dist/ui/broker-mark.svg",
+  "dist/ui/broker-routing.svg",
 ];
 
 const FORBIDDEN_PATTERNS = [/\.env/u, /^data\//u, /^test\//u, /^src\//u, /broker\.yaml$/u, /approvals\.json$/u];

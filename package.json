@@ -44,6 +44,8 @@
     "dist/ui/*.js",
     "dist/ui/*.css",
     "dist/ui/*.html",
+    "dist/ui/broker-mark.svg",
+    "dist/ui/broker-routing.svg",
     "config/broker.example.yaml",
     "README.md",
     "SECURITY.md",

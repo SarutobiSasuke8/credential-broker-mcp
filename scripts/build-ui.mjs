@@ -1,5 +1,5 @@
 // Builds the key manager page: compiles src/ui/*.ts to dist/ui and copies
-// the static HTML and CSS beside it. The key manager serves these files
+// the static HTML, CSS and SVG assets beside it. The key manager serves these files
 // itself on loopback under its CSP; nothing is fetched from anywhere else.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
@@ -19,5 +19,5 @@ if (noEmit) process.exit(0);
 
 mkdirSync(out, { recursive: true });
 for (const name of readdirSync(source)) {
-  if (name.endsWith(".html") || name.endsWith(".css")) copyFileSync(path.join(source, name), path.join(out, name));
+  if (/\.(html|css|svg)$/u.test(name)) copyFileSync(path.join(source, name), path.join(out, name));
 }
