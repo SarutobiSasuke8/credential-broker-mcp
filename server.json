@@ -5,6 +5,13 @@
   "description": "Local-first credential broker: agents use gated APIs through scoped, audited requests, never keys.",
   "version": "0.1.0",
   "websiteUrl": "https://github.com/SarutobiSasuke8/credential-broker-mcp#readme",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/SarutobiSasuke8/credential-broker-mcp/main/src/ui/broker-mark.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
   "repository": {
     "url": "https://github.com/SarutobiSasuke8/credential-broker-mcp",
     "source": "github"

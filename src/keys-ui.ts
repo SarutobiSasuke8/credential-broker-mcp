@@ -43,7 +43,7 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const uiRoot = join(packageRoot, "dist", "ui");
 
 /**
- * The page is three static files built from src/ui (HTML, CSS, JS) and read
+ * The page and its static assets are built from src/ui and read
  * once at start-up. They are served by this process only, on loopback, under
  * the same CSP: the page never loads anything from anywhere else.
  */
@@ -52,6 +52,8 @@ const UI_FILES = {
   css: readFileSync(join(uiRoot, "app.css"), "utf8"),
   app: readFileSync(join(uiRoot, "app.js"), "utf8"),
   logic: readFileSync(join(uiRoot, "logic.js"), "utf8"),
+  mark: readFileSync(join(uiRoot, "broker-mark.svg"), "utf8"),
+  routing: readFileSync(join(uiRoot, "broker-routing.svg"), "utf8"),
 };
 const packageVersion = String((JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version?: unknown }).version ?? "");
 
@@ -256,6 +258,8 @@ async function buildState(): Promise<object> {
       policyFile,
       auditFile,
       approvalsFile,
+      pauseFile,
+      reloadMarker,
     },
     paths: { policyFile, auditFile, approvalsFile, pauseFile, keyNotesFile, reloadMarker },
     version: packageVersion,
@@ -664,7 +668,7 @@ function send(res: ServerResponse, status: number, contentType: string, payload:
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
-    "content-security-policy": `default-src 'none'; script-src ${scripts}; style-src ${scripts}; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "content-security-policy": `default-src 'none'; script-src ${scripts}; style-src ${scripts}; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   });
   res.end(payload);
 }
@@ -783,6 +787,10 @@ const server = createServer((req, res) => {
     }
     if (req.method === "GET" && (path === "/ui/app.js" || path === "/ui/logic.js")) {
       send(res, 200, "text/javascript; charset=utf-8", path === "/ui/app.js" ? UI_FILES.app : UI_FILES.logic);
+      return;
+    }
+    if (req.method === "GET" && (path === "/ui/broker-mark.svg" || path === "/ui/broker-routing.svg")) {
+      send(res, 200, "image/svg+xml", path === "/ui/broker-mark.svg" ? UI_FILES.mark : UI_FILES.routing);
       return;
     }
     if (req.method === "POST" && path === "/api/close") {

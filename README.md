@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/SarutobiSasuke8/credential-broker-mcp/main/src/ui/broker-mark.svg" alt="" width="56" height="56">
+
 # Credential Broker MCP
 
 A local-first MCP server that lets AI agents use gated APIs **without ever
@@ -24,29 +26,37 @@ Manager, the macOS login keychain, or the Secret Service on Linux
 (GNOME Keyring or KWallet through `secret-tool`). Without one, set each
 credential's `env_var` instead.
 
-1. **Pick a folder for your policy** and open the key manager. It prints a
-   link and opens it in your browser.
+1. **Open the key manager.** From a clone of this repo, run the following.
+   The key manager prints a local link and opens it in your browser.
 
    ```bash
-   npx -p @sarutobi-sasuke/credential-broker-mcp credential-broker-keys
+   npm ci
+   npm run keys
    ```
 
-   Set `BROKER_POLICY_FILE` first if you want the policy somewhere other
-   than the package folder, for example `%USERPROFILE%\credential-broker\broker.yaml`.
-   From a clone of this repo, run `npm ci && npm run build` once, then
-   `npm run keys`.
+   Set `BROKER_POLICY_FILE`, `BROKER_AUDIT_FILE` and `BROKER_APPROVALS_FILE`
+   to absolute paths in a folder you control if you want to store those files
+   outside the checkout. Use stable paths when running the npm package.
+   Once published, launch the key manager with
+   `npx --package @sarutobi-sasuke/credential-broker-mcp@0.1.0 credential-broker-keys`.
 
-2. **Add one key.** In *Add a key*: short name `github`, base URL
+2. **Add one key.** Open **New key**. Use the short name `github`, base URL
    `https://api.github.com`, paste a token, tick the agent that may use it
-   (or add a new one called `claude`), press **Add key**. The key goes into
-   Credential Manager and the policy file gets a read-only grant. Press
+   (or add an identity such as `codex`), then press **Add key**. The key goes
+   into your OS keychain and the policy file gets a read-only grant. Press
    **Test** on the card to prove the key works.
 
-3. **Register with Claude Code.** Open *Connect to Claude Code* at the
-   bottom of the page, pick the agent, copy the `claude mcp add` command and
-   run it. Nothing secret is in that command.
+3. **Connect your MCP client.** Go to **Settings → Connect an MCP client**,
+   select **Codex** or **Claude Code**, then pick the agent. For Codex, paste
+   the copied TOML into `~/.codex/config.toml` or update the existing
+   `credential-broker` entry. For Claude Code, run the copied command.
+   Restart your client. Both options use local stdio and require Node on PATH.
+   The Codex configuration also applies to local sessions in the ChatGPT
+   desktop app on the same host. If you use environment-backed credentials,
+   list the variable names in `env_vars` under the Codex server table.
+   See the [Codex MCP configuration guide](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
-4. **Make a granted call and a denied call.** In Claude Code:
+4. **Make a granted call and a denied call.** In your client:
 
    > Use `broker_explain_request` for a GET to
    > `https://api.github.com/repos/octocat/hello-world` with credential `github`.
@@ -61,6 +71,17 @@ credential's `env_var` instead.
    type `PAUSE`. The agent's next call is refused with a message not to
    retry. Press **Resume all access** and type `RESUME`. From a terminal:
    `npm run pause -- on` and `npm run pause -- off`.
+
+### ChatGPT web
+
+The broker's native connection is local stdio. For a private ChatGPT
+integration, an eligible workspace can connect through [OpenAI Secure MCP
+Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels),
+with the tunnel client launching the broker under a dedicated policy identity.
+Run the tunnel client under the OS account that owns the keys and keep the
+key manager on loopback. This connection needs its own workspace setup and
+verification. Public distribution as a local ChatGPT desktop plugin is
+[limited to approved partners](https://developers.openai.com/plugins/deploy/desktop-only).
 
 ## Why
 
@@ -415,15 +436,20 @@ Environment:
 | `BROKER_ALLOW_KEY_REQUESTS` | `1` enables `broker_request_credential` for this agent. Off by default. |
 | *(per credential)* | Each credential's `env_var` carries its secret, overriding a stored key. |
 
-Claude Code registration (once published; see the pre-release note above):
+Manual Claude Code registration from a checkout:
 
 ```json
 {
   "mcpServers": {
     "credential-broker": {
-      "command": "npx",
-      "args": ["-y", "@sarutobi-sasuke/credential-broker-mcp"],
-      "env": { "BROKER_AGENT_ID": "researcher" }
+      "command": "node",
+      "args": ["/absolute/path/to/credential-broker/dist/src/stdio.js"],
+      "env": {
+        "BROKER_AGENT_ID": "researcher",
+        "BROKER_POLICY_FILE": "/absolute/path/to/broker.yaml",
+        "BROKER_AUDIT_FILE": "/absolute/path/to/audit.jsonl",
+        "BROKER_APPROVALS_FILE": "/absolute/path/to/approvals.json"
+      }
     }
   }
 }
@@ -433,7 +459,7 @@ Claude Code registration (once published; see the pre-release note above):
 
 Run `npm run check` for types, lint and unit tests, `npm run verify:pack`
 for the package allowlist, and `npm run test:e2e` for the installed-server
-proof. CI runs these on Windows and Linux with Node 22 and 24.
+proof. CI runs these on Windows, macOS and Linux with Node 22 and 24.
 
 The end-to-end test packs the project, installs the tarball into an empty
 directory and starts its declared stdio executable. Synthetic credentials

@@ -120,7 +120,7 @@ interface State {
   approvable: Approvable[];
   agents: Agent[];
   groups: { id: string; members: string[] }[];
-  register: { stdioEntry: string; policyFile: string; auditFile: string; approvalsFile: string };
+  register: { stdioEntry: string; policyFile: string; auditFile: string; approvalsFile: string; pauseFile: string; reloadMarker: string };
   paths: Record<string, string>;
   version: string;
   platform: string;
@@ -832,10 +832,14 @@ function renderOverview(): Child[] {
     recent,
   ]);
 
-  const newKey = el("button", { type: "button", className: "btn primary", text: "New key" });
-  newKey.addEventListener("click", () => openNewKey({}));
   return [
-    pageHead("Overview", `${s.policyFile}${s.keychain ? ` \u00b7 keys in ${s.keychain}` : ""}`, [newKey]),
+    el("div", { className: "overview-intro" }, [
+      el("div", {}, [
+        el("h1", { text: "Access overview" }),
+        el("p", { text: "Grant agents access to specific API operations and keep the keys with the broker." }),
+      ]),
+      el("img", { src: "/ui/broker-routing.svg", alt: "", width: "360", height: "160" }),
+    ]),
     tiles,
     el("div", { className: "cols" }, [attentionCard, activityCard]),
   ];
@@ -1601,28 +1605,67 @@ function renderImport(): Child[] {
 
 // ---- settings ------------------------------------------------------------------------------
 
+let connectionClient = "claude";
+let connectionAgent = "";
+
 function renderSettings(): Child[] {
   if (!state) return [];
   const s = state;
+  const clientSel = el("select", { "aria-label": "Client", "data-fid": "connectClient" }, [
+    el("option", { value: "claude", text: "Claude Code" }),
+    el("option", { value: "codex", text: "Codex" }),
+  ]);
+  clientSel.value = connectionClient;
   const agentSel = el("select", { "aria-label": "Agent", "data-fid": "connectAgent" }, s.agents.map((a) => el("option", { value: a.id, text: a.id })));
+  if (s.agents.some((a) => a.id === connectionAgent)) agentSel.value = connectionAgent;
   const cmd = el("pre", { id: "connectCmd" });
-  const q = (x: string): string => `"${x}"`;
-  const paintCmd = (): void => {
-    const r = s.register;
-    cmd.textContent = agentSel.value
-      ? `claude mcp add credential-broker --scope user -e BROKER_AGENT_ID=${agentSel.value} -e BROKER_POLICY_FILE=${q(r.policyFile)} -e BROKER_AUDIT_FILE=${q(r.auditFile)} -e BROKER_APPROVALS_FILE=${q(r.approvalsFile)} -- node ${q(r.stdioEntry)}`
-      : "Add a key with an agent first.";
-  };
-  agentSel.addEventListener("change", paintCmd);
-  paintCmd();
+  const instructions = el("p", { className: "hint" });
   const copy = el("button", { type: "button", className: "btn", text: "Copy" });
+  const paintCmd = (): void => {
+    const codex = clientSel.value === "codex";
+    const r = s.register;
+    instructions.textContent = codex
+      ? "Add this block to your Codex config.toml, or update the existing credential-broker entry. The same setup works in local ChatGPT desktop sessions on this host. Restart the client after saving."
+      : "Run this command in your terminal, then restart Claude Code.";
+    copy.disabled = !agentSel.value;
+    if (!agentSel.value) {
+      cmd.textContent = "Add an agent first.";
+    } else if (codex) {
+      const q = (value: string): string => JSON.stringify(value);
+      cmd.textContent = [
+        "[mcp_servers.credential-broker]",
+        'command = "node"',
+        `args = [${q(r.stdioEntry)}]`,
+        "",
+        "[mcp_servers.credential-broker.env]",
+        `BROKER_AGENT_ID = ${q(agentSel.value)}`,
+        `BROKER_POLICY_FILE = ${q(r.policyFile)}`,
+        `BROKER_AUDIT_FILE = ${q(r.auditFile)}`,
+        `BROKER_APPROVALS_FILE = ${q(r.approvalsFile)}`,
+        `BROKER_PAUSE_FILE = ${q(r.pauseFile)}`,
+        `BROKER_RELOAD_MARKER = ${q(r.reloadMarker)}`,
+      ].join("\n");
+    } else {
+      const q = (value: string): string => `"${value}"`;
+      cmd.textContent = `claude mcp add credential-broker --scope user -e BROKER_AGENT_ID=${agentSel.value} -e BROKER_POLICY_FILE=${q(r.policyFile)} -e BROKER_AUDIT_FILE=${q(r.auditFile)} -e BROKER_APPROVALS_FILE=${q(r.approvalsFile)} -e BROKER_PAUSE_FILE=${q(r.pauseFile)} -e BROKER_RELOAD_MARKER=${q(r.reloadMarker)} -- node ${q(r.stdioEntry)}`;
+    }
+  };
+  clientSel.addEventListener("change", () => {
+    connectionClient = clientSel.value;
+    paintCmd();
+  });
+  agentSel.addEventListener("change", () => {
+    connectionAgent = agentSel.value;
+    paintCmd();
+  });
+  paintCmd();
   copy.addEventListener("click", () => {
     void navigator.clipboard.writeText(cmd.textContent ?? "").then(() => {
       copy.textContent = "Copied";
       window.setTimeout(() => {
         copy.textContent = "Copy";
       }, 1500);
-    });
+    }).catch(() => toast("Could not copy. Select and copy the setup text manually."));
   });
   const themeSel = el("select", { "aria-label": "Theme" }, [el("option", { value: "system", text: "Follow the system" }), el("option", { value: "light", text: "Light" }), el("option", { value: "dark", text: "Dark" })]);
   themeSel.value = readTheme();
@@ -1645,11 +1688,12 @@ function renderSettings(): Child[] {
     pageHead("Settings", "Where things live, how to connect an agent, and how this page looks."),
     el("div", { className: "stack" }, [
       el("div", { className: "card" }, [
-        el("div", { className: "card-head" }, [el("h2", { text: "Connect to Claude Code" })]),
+        el("div", { className: "card-head" }, [el("h2", { text: "Connect an MCP client" })]),
         el("div", { className: "card-body stack" }, [
-          el("p", { className: "hint", text: "Run once per agent identity. The broker reads keys from the keychain at start-up, so nothing secret goes in this command. Restart Claude Code after changing a key, or set BROKER_HOT_RELOAD=1 on the broker." }),
-          el("div", { className: "row" }, [el("label", { className: "hint" }, [text("Agent "), agentSel]), copy]),
+          el("div", { className: "row" }, [el("label", { className: "hint" }, [text("Client "), clientSel]), el("label", { className: "hint" }, [text("Agent "), agentSel]), copy]),
+          instructions,
           cmd,
+          el("p", { className: "hint", text: "The setup includes paths and an agent ID. The broker loads credentials at startup. After changing a key, restart the client or enable BROKER_HOT_RELOAD=1." }),
         ]),
       ]),
       el("div", { className: "card" }, [el("div", { className: "card-head" }, [el("h2", { text: "Files" })]), el("div", { className: "card-body" }, [paths])]),
