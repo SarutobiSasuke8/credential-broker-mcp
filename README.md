@@ -16,8 +16,12 @@ An upstream that transforms a secret with a one-way function of its own
 defeats string matching; scoped operations and metadata-only responses are
 the defence there, and SECURITY.md states this boundary honestly.
 
-> **Pre-release.** Nothing is published to npm yet. Treat `main` as a work
-> in progress until a tagged `v0.1.0` exists.
+[![npm](https://img.shields.io/npm/v/@sarutobi-sasuke/credential-broker-mcp)](https://www.npmjs.com/package/@sarutobi-sasuke/credential-broker-mcp)
+[![provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/@sarutobi-sasuke/credential-broker-mcp#provenance)
+[![licence](https://img.shields.io/npm/l/@sarutobi-sasuke/credential-broker-mcp)](LICENSE)
+
+> **Early release (0.x).** Published to npm with provenance from GitHub
+> Actions. Expect the policy format and tools to change before 1.0.
 
 ## Five-minute quickstart
 
@@ -26,19 +30,19 @@ Manager, the macOS login keychain, or the Secret Service on Linux
 (GNOME Keyring or KWallet through `secret-tool`). Without one, set each
 credential's `env_var` instead.
 
-1. **Open the key manager.** From a clone of this repo, run the following.
-   The key manager prints a local link and opens it in your browser.
+1. **Open the key manager.** It prints a local link and opens it in your
+   browser.
 
    ```bash
-   npm ci
-   npm run keys
+   npx -y -p @sarutobi-sasuke/credential-broker-mcp credential-broker-keys
    ```
 
-   Set `BROKER_POLICY_FILE`, `BROKER_AUDIT_FILE` and `BROKER_APPROVALS_FILE`
-   to absolute paths in a folder you control if you want to store those files
-   outside the checkout. Use stable paths when running the npm package.
-   Once published, launch the key manager with
-   `npx --package @sarutobi-sasuke/credential-broker-mcp@0.1.0 credential-broker-keys`.
+   Run through `npx`, the policy, audit log and approvals live in
+   `~/.credential-broker` (`%USERPROFILE%\.credential-broker` on Windows), so
+   they survive npm cache clean-ups and upgrades. Set `BROKER_HOME`, or
+   `BROKER_POLICY_FILE`, `BROKER_AUDIT_FILE` and `BROKER_APPROVALS_FILE`, to
+   put them somewhere else. From a clone of this repo, run `npm ci` then
+   `npm run keys`; the files then stay in the checkout.
 
 2. **Add one key.** Open **New key**. Use the short name `github`, base URL
    `https://api.github.com`, paste a token, tick the agent that may use it

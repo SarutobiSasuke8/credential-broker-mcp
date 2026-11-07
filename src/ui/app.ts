@@ -125,7 +125,7 @@ interface State {
   approvable: Approvable[];
   agents: Agent[];
   groups: { id: string; members: string[] }[];
-  register: { stdioEntry: string; policyFile: string; auditFile: string; approvalsFile: string; pauseFile: string; reloadMarker: string };
+  register: { stdioEntry: string; launch: { command: string; args: string[] }; policyFile: string; auditFile: string; approvalsFile: string; pauseFile: string; reloadMarker: string };
   paths: Record<string, string>;
   version: string;
   platform: string;
@@ -1762,8 +1762,8 @@ function renderSettings(): Child[] {
       const q = (value: string): string => JSON.stringify(value);
       cmd.textContent = [
         "[mcp_servers.credential-broker]",
-        'command = "node"',
-        `args = [${q(r.stdioEntry)}]`,
+        `command = ${q(r.launch.command)}`,
+        `args = [${r.launch.args.map(q).join(", ")}]`,
         "",
         "[mcp_servers.credential-broker.env]",
         `BROKER_AGENT_ID = ${q(agentSel.value)}`,
@@ -1775,7 +1775,7 @@ function renderSettings(): Child[] {
       ].join("\n");
     } else {
       const q = (value: string): string => `"${value}"`;
-      cmd.textContent = `claude mcp add credential-broker --scope user -e BROKER_AGENT_ID=${agentSel.value} -e BROKER_POLICY_FILE=${q(r.policyFile)} -e BROKER_AUDIT_FILE=${q(r.auditFile)} -e BROKER_APPROVALS_FILE=${q(r.approvalsFile)} -e BROKER_PAUSE_FILE=${q(r.pauseFile)} -e BROKER_RELOAD_MARKER=${q(r.reloadMarker)} -- node ${q(r.stdioEntry)}`;
+      cmd.textContent = `claude mcp add credential-broker --scope user -e BROKER_AGENT_ID=${agentSel.value} -e BROKER_POLICY_FILE=${q(r.policyFile)} -e BROKER_AUDIT_FILE=${q(r.auditFile)} -e BROKER_APPROVALS_FILE=${q(r.approvalsFile)} -e BROKER_PAUSE_FILE=${q(r.pauseFile)} -e BROKER_RELOAD_MARKER=${q(r.reloadMarker)} -- ${[r.launch.command, ...r.launch.args].map((a) => (/[\s"]/u.test(a) ? q(a) : a)).join(" ")}`;
     }
   };
   clientSel.addEventListener("change", () => {

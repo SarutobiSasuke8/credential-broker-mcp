@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,13 +62,25 @@ const packageVersion = String((JSON.parse(readFileSync(join(packageRoot, "packag
 function renderPage(nonce: string): string {
   return UI_FILES.html.split("__NONCE__").join(nonce);
 }
-const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(packageRoot, "config", "broker.yaml"));
-const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(packageRoot, "data", "audit.jsonl"));
-const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(packageRoot, "config", "approvals.json"));
+// Run through npx, the package lives in npm's cache, which npm may prune and which
+// changes with every version. Keep the policy, audit log and approvals in a stable
+// folder in the user's home instead, and register clients through npx, not a cache path.
+const npxInstall = /[\\/]_npx[\\/]/u.test(packageRoot);
+const dataRoot = resolve(process.env.BROKER_HOME ?? (npxInstall ? join(homedir(), ".credential-broker") : packageRoot));
+const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(dataRoot, "config", "broker.yaml"));
+const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(dataRoot, "data", "audit.jsonl"));
+const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(dataRoot, "config", "approvals.json"));
 const pauseFile = pauseFilePath(policyFile);
 const reloadMarker = reloadMarkerPath(policyFile);
 const keyNotesFile = resolve(process.env.BROKER_KEY_NOTES_FILE ?? join(dirname(policyFile), "key-notes.json"));
 const stdioEntry = join(packageRoot, "dist", "src", "stdio.js");
+const packageName = String((JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { name?: unknown }).name ?? "");
+/** How an MCP client should start the stdio server: a pinned npx call for npx installs, node on the entry otherwise. */
+const launch: { command: string; args: string[] } = npxInstall
+  ? process.platform === "win32"
+    ? { command: "cmd", args: ["/c", "npx", "-y", "-p", `${packageName}@${packageVersion}`, "credential-broker-stdio"] }
+    : { command: "npx", args: ["-y", "-p", `${packageName}@${packageVersion}`, "credential-broker-stdio"] }
+  : { command: "node", args: [stdioEntry] };
 const requestedPort = Number(process.env.BROKER_KEYS_PORT ?? 0);
 const IDLE_SHUTDOWN_MS = 30 * 60 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
@@ -262,6 +275,7 @@ async function buildState(): Promise<object> {
     groups: policy ? [...policy.groups].map(([id, members]) => ({ id, members })) : [],
     register: {
       stdioEntry,
+      launch,
       policyFile,
       auditFile,
       approvalsFile,

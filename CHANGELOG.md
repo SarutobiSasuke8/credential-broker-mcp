@@ -5,8 +5,32 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-Nothing in this project has been published to npm yet. Everything below is
-unreleased work on `main` towards a first `v0.1.0`.
+## 0.1.1 - 2026-11-07
+
+### Fixed
+
+- Run through `npx`, the key manager kept the policy, audit log and
+  approvals inside npm's cache, which npm can prune and which changes with
+  every version. It now keeps them in `~/.credential-broker` (override with
+  `BROKER_HOME` or the individual `BROKER_*_FILE` variables). A key manager
+  run from a clone or a normal install is unchanged.
+- The *Connect to Claude Code* and Codex snippets pointed `node` at a file
+  inside the npx cache. For npx installs they now start the server with a
+  version-pinned `npx -p @sarutobi-sasuke/credential-broker-mcp@<version>
+  credential-broker-stdio` (through `cmd /c` on Windows).
+
+### Changed
+
+- Key manager: a simple paste-a-key flow with the detailed setup on its own
+  page, quick add on the overview, and the gateway branding and control room
+  layout.
+- More npm keywords (secrets, API keys, `.env`, Claude Code) so the package
+  can be found by the problem it solves.
+
+## 0.1.0 - 2026-11-07
+
+First npm release, published from GitHub Actions with provenance through
+npm trusted publishing. Everything below shipped in 0.1.0.
 
 ### Security
 

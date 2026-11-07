@@ -1,6 +1,6 @@
 {
   "name": "@sarutobi-sasuke/credential-broker-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.SarutobiSasuke8/credential-broker-mcp",
   "description": "Local-first MCP credential broker: agents use gated APIs through scoped, audited requests without ever seeing the secret.",
   "license": "Apache-2.0",
@@ -26,7 +26,14 @@
     "ai-agents",
     "credentials",
     "api-gateway",
-    "delegated-access"
+    "delegated-access",
+    "secrets",
+    "secrets-management",
+    "api-keys",
+    "dotenv",
+    "env",
+    "claude-code",
+    "agent-security"
   ],
   "bin": {
     "credential-broker-stdio": "dist/src/stdio.js",
