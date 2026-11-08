@@ -121,7 +121,89 @@ const PRESETS: { match: RegExp; preset: Preset }[] = [
     match: /^(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT)$/u,
     preset: { id: "github", label: "GitHub", baseUrl: "https://api.github.com", kind: "bearer", testPath: "/user" },
   },
+  {
+    match: /^(ITCH_API_KEY|BUTLER_API_KEY)$/u,
+    preset: { id: "itch", label: "itch.io", baseUrl: "https://api.itch.io", kind: "bearer", testPath: "/profile" },
+  },
+  {
+    match: /^(CLOUDFLARE_API_TOKEN|CF_API_TOKEN)$/u,
+    preset: { id: "cloudflare", label: "Cloudflare", baseUrl: "https://api.cloudflare.com/client/v4", kind: "bearer", testPath: "/user/tokens/verify" },
+  },
+  {
+    match: /^(STRIPE_API_KEY|STRIPE_SECRET_KEY)$/u,
+    preset: { id: "stripe", label: "Stripe", baseUrl: "https://api.stripe.com/v1", kind: "bearer", testPath: "/balance" },
+  },
+  {
+    match: /^(VERCEL_TOKEN|VERCEL_API_TOKEN)$/u,
+    preset: { id: "vercel", label: "Vercel", baseUrl: "https://api.vercel.com", kind: "bearer", testPath: "/v2/user" },
+  },
+  {
+    match: /^(HUBSPOT_ACCESS_TOKEN|HUBSPOT_PRIVATE_APP_TOKEN)$/u,
+    preset: { id: "hubspot", label: "HubSpot", baseUrl: "https://api.hubapi.com", kind: "bearer", testPath: "/account-info/v3/details" },
+  },
+  {
+    match: /^APOLLO_API_KEY$/u,
+    preset: { id: "apollo", label: "Apollo", baseUrl: "https://api.apollo.io/api/v1", kind: "header", paramName: "x-api-key", testPath: "/auth/health" },
+  },
+  {
+    match: /^(FIGMA_ACCESS_TOKEN|FIGMA_TOKEN|FIGMA_API_KEY)$/u,
+    preset: { id: "figma", label: "Figma", baseUrl: "https://api.figma.com/v1", kind: "header", paramName: "x-figma-token", testPath: "/me" },
+  },
+  {
+    match: /^RESEND_API_KEY$/u,
+    preset: { id: "resend", label: "Resend", baseUrl: "https://api.resend.com", kind: "bearer", testPath: "/domains" },
+  },
+  {
+    match: /^(HF_TOKEN|HUGGINGFACE_API_KEY|HUGGING_FACE_HUB_TOKEN)$/u,
+    preset: { id: "huggingface", label: "Hugging Face", baseUrl: "https://huggingface.co/api", kind: "bearer", testPath: "/whoami-v2" },
+  },
+  {
+    match: /^REPLICATE_API_TOKEN$/u,
+    preset: { id: "replicate", label: "Replicate", baseUrl: "https://api.replicate.com/v1", kind: "bearer", testPath: "/account" },
+  },
 ];
+
+/** Known provider by preset id, for pre-filling the key manager from a trusted table. */
+export function findPresetById(id: string): Preset | null {
+  return PRESETS.find((p) => p.preset.id === id)?.preset ?? null;
+}
+
+/** Every known provider, for suggestions. */
+export function listPresets(): Preset[] {
+  return PRESETS.map((p) => p.preset);
+}
+
+/** Where to create or revoke a key at each provider. A fixed, reviewed table: never agent-supplied. */
+const KEYS_URLS: Record<string, string> = {
+  openrouter: "https://openrouter.ai/keys",
+  gemini: "https://aistudio.google.com/apikey",
+  elevenlabs: "https://elevenlabs.io/app/settings/api-keys",
+  digitalocean: "https://cloud.digitalocean.com/account/api/tokens",
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  github: "https://github.com/settings/personal-access-tokens",
+  itch: "https://itch.io/user/settings/api-keys",
+  cloudflare: "https://dash.cloudflare.com/profile/api-tokens",
+  stripe: "https://dashboard.stripe.com/apikeys",
+  vercel: "https://vercel.com/account/tokens",
+  apollo: "https://app.apollo.io/#/settings/integrations/api",
+  resend: "https://resend.com/api-keys",
+  huggingface: "https://huggingface.co/settings/tokens",
+  replicate: "https://replicate.com/account/api-tokens",
+  coingecko: "https://www.coingecko.com/en/developers/dashboard",
+};
+
+/** The provider matching a credential's base URL by origin, if it is a known one. */
+export function findPresetByOrigin(baseUrl: string): (Preset & { keysUrl: string | null }) | null {
+  let origin: string;
+  try {
+    origin = new URL(baseUrl).origin;
+  } catch {
+    return null;
+  }
+  const hit = PRESETS.find((p) => new URL(p.preset.baseUrl).origin === origin)?.preset;
+  return hit ? { ...hit, keysUrl: KEYS_URLS[hit.id] ?? null } : null;
+}
 
 /** MCP servers whose header keys map to a known API. Keyed by URL host. */
 const MCP_HEADER_PRESETS: Record<string, Preset> = {

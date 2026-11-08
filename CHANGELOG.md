@@ -5,11 +5,153 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-Nothing in this project has been published to npm yet. Everything below is
-unreleased work on `main` towards a first `v0.1.0`.
+## 0.1.1 - 2026-11-07
+
+### Fixed
+
+- Run through `npx`, the key manager kept the policy, audit log and
+  approvals inside npm's cache, which npm can prune and which changes with
+  every version. It now keeps them in `~/.credential-broker` (override with
+  `BROKER_HOME` or the individual `BROKER_*_FILE` variables). A key manager
+  run from a clone or a normal install is unchanged.
+- The *Connect to Claude Code* and Codex snippets pointed `node` at a file
+  inside the npx cache. For npx installs they now start the server with a
+  version-pinned `npx -p @sarutobi-sasuke/credential-broker-mcp@<version>
+  credential-broker-stdio` (through `cmd /c` on Windows).
+
+### Changed
+
+- Key manager: a simple paste-a-key flow with the detailed setup on its own
+  page, quick add on the overview, and the gateway branding and control room
+  layout.
+- More npm keywords (secrets, API keys, `.env`, Claude Code) so the package
+  can be found by the problem it solves.
+
+## 0.1.0 - 2026-11-07
+
+First npm release, published from GitHub Actions with provenance through
+npm trusted publishing. Everything below shipped in 0.1.0.
+
+### Security
+
+Findings from an adversarial review of the engine, key manager, pause and
+reload paths, all fixed here:
+
+- Truncated responses lost a trailing run only when it was a prefix of a
+  secret, which made the cut an oracle an agent could use to recover a key
+  prefix through an upstream that echoes its input. Truncation now removes
+  a fixed amount that depends only on the secrets' lengths.
+- The redactor covered Base64 of the secret only when the secret started a
+  Base64 block. It now covers the secret at byte offsets 1 and 2 inside a
+  larger encoded value, and the JSON string-escaped forms (including `\/`).
+- A path segment such as `..;` passed canonicalisation but is `..` to
+  servlet containers. Any dot segment hidden behind a path parameter is now
+  rejected.
+- A content type that `Headers` rejects (control characters) escaped
+  `execute()` after the `executing` audit line. Content types are now
+  validated as media types with or without a body, and the header is set
+  inside the guarded section.
+- Under hot reload, a policy that no longer listed the broker's identity
+  kept the previous grants live. The identity is now swapped in as
+  disabled with no grants, so every request is denied, and the reload is
+  audited.
+- Pause tamper evidence: a release that arrives through the file (for
+  example a forged resume record) is now audited as `PAUSE_RELEASED`; a
+  file whose revision went backwards is held; a freshly started broker
+  seeds its memory from the audit log so deleting the file and restarting
+  no longer resumes quietly; repairing an unreadable file keeps everything
+  paused unless the request is the explicit resume of all; resume record
+  times are clamped to now; prototype keys such as `constructor` cannot
+  match a pause entry.
+- Key manager: a fresh CSP nonce per page load; temp files use random
+  names and `wx` so a planted link is never written through; SECURITY.md
+  says plainly that the `0600` mode does nothing on NTFS.
+- `mcp-eval.yml` checks out with `persist-credentials: false` like the other
+  workflows.
 
 ### Added
 
+- Key manager: an **Add agent** drawer on the Agents page creates a policy
+  agent (id, display name, enabled, which APIs it may read). The agent is
+  deny-by-default and the edit goes through the same validated policy-save
+  path as New key, with the backup and the hot-reload marker. New
+  `POST /api/agent` endpoint; no secret is involved.
+- Key manager: the page links now sit in the header bar itself, next to
+  the brand and search, with the status chip, pause control and New key on
+  the right; below 1200px they fold into a menu button.
+
+### Fixed
+
+- Key manager: the Keys page said "No keys yet" while listing saved keys
+  below it. "No keys yet" now appears only when nothing is saved anywhere.
+  Keys the keychain holds that no API uses are called "Not connected to an
+  agent yet", with one line saying what that means and a Connect to an API
+  action; the Overview tiles, attention list and the header chip ("No agent
+  access yet" when no agent can reach anything) describe them the same way.
+- Key manager redesign. A sticky header with global search (`/` and
+  `Ctrl+K`, grouped results, arrow keys and Enter), a New key button that
+  opens a side drawer with a searchable provider picker, the pause control
+  and a status chip. Hash-routed pages with no reload: Overview (tiles,
+  attention list, recent activity), Keys (sortable table, filter chips,
+  detail panel with every manage action), Agents, Approvals, Activity
+  (content-free audit view with agent, key, outcome and time filters and
+  CSV export), Import and Settings. Light and dark themes following the
+  system with a remembered toggle, system fonts only, reduced-motion
+  support, focus trapping in drawers and dialogs, `aria-live` status, and
+  a layout that works from 360px up. The page source now lives in
+  `src/ui/` as separate TypeScript, CSS and HTML files built into
+  `dist/ui` and served by the key manager itself on loopback under the
+  same CSP (a fresh nonce per load, no external assets). The session token
+  moves from the fragment into `sessionStorage` for this tab, so a reload
+  keeps the session. New content-free `POST /api/activity` endpoint.
+- Key storage on macOS (login keychain through `security -i`, the secret
+  over stdin) and Linux (Secret Service through `secret-tool`), behind the
+  same `SecretStore` interface as Windows, picked by platform. All three
+  stores run through one command-runner seam and are unit tested with a
+  fake. CI now also runs on macOS. Real round trips on a Mac and a Linux
+  desktop remain a manual check.
+- Release plumbing for `v0.1.0`: `mcpName` in `package.json` and a
+  `server.json` for the MCP Registry, checked against each other by a test.
+  The installed-package proof now also runs the `credential-broker-pause`
+  binary through pause, status and resume, and starts and closes
+  `credential-broker-keys`. Dependabot updates are grouped.
+- Community files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull
+  request templates, and a supported-versions table in `SECURITY.md`.
+- Docs: a five-minute quickstart at the top of the README, the
+  `broker_request_credential` tool in the tools table, every `BROKER_*`
+  variable in the environment table, and a `docs/` page for each opt-in
+  control (pause, hot reload, key requests, approvals).
+- The key manager creates the policy folder when `BROKER_POLICY_FILE`
+  points somewhere new.
+- Pause safeguards. Pausing everything asks you to type `PAUSE` and resuming
+  everything asks for `RESUME`; pausing one agent or key confirms and offers an
+  eight second Undo; resuming one confirms. Every pause and resume, from the
+  page or `npm run pause`, writes a content-free audit line. Resuming never
+  deletes `pause.json`, and a running broker that sees an active pause vanish
+  without a resume record stays paused and audits `PAUSE_TAMPER`. The terminal
+  command stays immediate, accepts `--yes`, and prints exactly what changed.
+- Panic button: a pause switch (`pause.json`) checked before every request, for
+  everything, one agent or one key. One click in the key manager, or
+  `npm run pause`. Fails closed (an unreadable file pauses everything), needs no
+  restart, outranks every grant, and never relays the operator's reason to the
+  agent or the audit. Adds the `operator-pause` deciding rule.
+- Opt-in hot reload (`BROKER_HOT_RELOAD=1`): the key manager writes a marker
+  after each change and a running broker rebuilds its policy and secrets. A
+  failed reload keeps the previous state and is audited.
+- Key manager: last-used and 30-day outcome counts per key from the audit log,
+  key replacement dates, provider key-page links, an Approvals panel (create and
+  revoke approvals for operations that already require one), per-agent and
+  per-key pause, and about twenty known providers.
+- Opt-in `broker_request_credential` tool (`BROKER_ALLOW_KEY_REQUESTS=1`):
+  an agent can ask the operator for a key. The broker opens the key manager
+  in the operator's browser, pre-filled with the name, the agent's reason and
+  a provider from the broker's own table. The agent never sees the page
+  address, token or entered value, cannot choose the base URL, and is rate
+  limited (one per credential per 10 minutes, five an hour). Adds an itch.io
+  provider preset.
+- Key manager redesign: Add a key first, a summary strip, a searchable and
+  filterable key list sorted by urgency, and optional expiry dates and notes
+  per key kept in `key-notes.json` beside the policy.
 - Clean-tarball stdio proof with a synthetic loopback API, checking
   principal grants, rejected requests, redacted responses, metadata-only
   output, approval revocation and audit contents. CI covers Windows/Linux

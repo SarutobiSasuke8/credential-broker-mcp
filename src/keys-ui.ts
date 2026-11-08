@@ -1,19 +1,26 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
-import { copyFile, readFile, rename, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { scanForKeys } from "./import-scan.js";
-import { effectiveCredentialIds } from "./grants.js";
+import { findPresetById, findPresetByOrigin, scanForKeys } from "./import-scan.js";
+import { effectiveCredentialIds, effectiveGrant } from "./grants.js";
+import { approvalState, createApproval, parseApprovals, pruneApprovals, revokeApproval, serializeApprovals } from "./approvals-admin.js";
+import { applyMetaUpdate, EXPIRY_WARNING_DAYS, expiryStatus, markRotated, MAX_NOTE_LENGTH, parseKeyMeta, serializeKeyMeta } from "./key-meta.js";
+import { anyPauseActive, pauseFilePath } from "./kill-switch.js";
+import { changePause, confirmationMatches, pauseRequestSchema, readPauseFile } from "./pause-admin.js";
+import { reloadMarkerPath, touchReloadMarker } from "./reload.js";
+import { readAuditLines, summarizeUsage, USAGE_WINDOW_DAYS } from "./usage.js";
 import { MAX_SECRET_BYTES, platformSecretStore } from "./keychain.js";
-import { renderKeysPage } from "./keys-page.js";
-import { addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
+import { listPresets } from "./import-scan.js";
+import { addAgentToPolicy, addCredentialToPolicy, describePolicyError, envVarFor } from "./policy-edit.js";
 import { parseBrokerPolicy } from "./policy.js";
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -34,17 +41,52 @@ import type { BrokerPolicy, CredentialSpec } from "./types.js";
  */
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(packageRoot, "config", "broker.yaml"));
-const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(packageRoot, "data", "audit.jsonl"));
-const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(packageRoot, "config", "approvals.json"));
+const uiRoot = join(packageRoot, "dist", "ui");
+
+/**
+ * The page and its static assets are built from src/ui and read
+ * once at start-up. They are served by this process only, on loopback, under
+ * the same CSP: the page never loads anything from anywhere else.
+ */
+const UI_FILES = {
+  html: readFileSync(join(uiRoot, "index.html"), "utf8"),
+  css: readFileSync(join(uiRoot, "app.css"), "utf8"),
+  app: readFileSync(join(uiRoot, "app.js"), "utf8"),
+  logic: readFileSync(join(uiRoot, "logic.js"), "utf8"),
+  mark: readFileSync(join(uiRoot, "broker-mark.svg"), "utf8"),
+  routing: readFileSync(join(uiRoot, "broker-routing.svg"), "utf8"),
+};
+const packageVersion = String((JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version?: unknown }).version ?? "");
+
+/** Fills the per-request nonce into the shell. split/join, so nothing in the page is treated as a pattern. */
+function renderPage(nonce: string): string {
+  return UI_FILES.html.split("__NONCE__").join(nonce);
+}
+// Run through npx, the package lives in npm's cache, which npm may prune and which
+// changes with every version. Keep the policy, audit log and approvals in a stable
+// folder in the user's home instead, and register clients through npx, not a cache path.
+const npxInstall = /[\\/]_npx[\\/]/u.test(packageRoot);
+const dataRoot = resolve(process.env.BROKER_HOME ?? (npxInstall ? join(homedir(), ".credential-broker") : packageRoot));
+const policyFile = resolve(process.env.BROKER_POLICY_FILE ?? join(dataRoot, "config", "broker.yaml"));
+const auditFile = resolve(process.env.BROKER_AUDIT_FILE ?? join(dataRoot, "data", "audit.jsonl"));
+const approvalsFile = resolve(process.env.BROKER_APPROVALS_FILE ?? join(dataRoot, "config", "approvals.json"));
+const pauseFile = pauseFilePath(policyFile);
+const reloadMarker = reloadMarkerPath(policyFile);
+const keyNotesFile = resolve(process.env.BROKER_KEY_NOTES_FILE ?? join(dirname(policyFile), "key-notes.json"));
 const stdioEntry = join(packageRoot, "dist", "src", "stdio.js");
+const packageName = String((JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { name?: unknown }).name ?? "");
+/** How an MCP client should start the stdio server: a pinned npx call for npx installs, node on the entry otherwise. */
+const launch: { command: string; args: string[] } = npxInstall
+  ? process.platform === "win32"
+    ? { command: "cmd", args: ["/c", "npx", "-y", "-p", `${packageName}@${packageVersion}`, "credential-broker-stdio"] }
+    : { command: "npx", args: ["-y", "-p", `${packageName}@${packageVersion}`, "credential-broker-stdio"] }
+  : { command: "node", args: [stdioEntry] };
 const requestedPort = Number(process.env.BROKER_KEYS_PORT ?? 0);
 const IDLE_SHUTDOWN_MS = 30 * 60 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
 
 const store = platformSecretStore();
 const token = randomBytes(32).toString("hex");
-const nonce = randomBytes(16).toString("base64");
 
 const ID = z.string().regex(/^[a-z0-9][a-z0-9._-]{1,63}$/u, "Use 2 to 64 lowercase letters, digits, dots, dashes or underscores.");
 const QUERY_KEY = z.string().regex(/^[A-Za-z0-9._~-]{1,100}$/u);
@@ -52,7 +94,14 @@ const QUERY_KEY = z.string().regex(/^[A-Za-z0-9._~-]{1,100}$/u);
 const saveSecretSchema = z.object({ credentialId: ID, value: z.string() });
 const credentialRefSchema = z.object({ credentialId: ID });
 const testSchema = z.object({ credentialId: ID, path: z.string().max(500).default("") });
+const metaSchema = z.object({
+  credentialId: ID,
+  expires: z.string().max(10).nullable().default(null),
+  note: z.string().max(MAX_NOTE_LENGTH).default(""),
+});
 const addCredentialSchema = z.object({
+  expires: z.string().max(10).nullable().optional(),
+  userNote: z.string().max(MAX_NOTE_LENGTH).optional(),
   id: ID,
   description: z.string().max(200).default(""),
   kind: z.enum(["bearer", "header", "basic", "query"]),
@@ -73,6 +122,13 @@ const addCredentialSchema = z.object({
   groupIds: z.array(ID).max(100).optional(),
   groupQueryParams: z.array(QUERY_KEY).max(50).optional(),
 });
+const addAgentSchema = z.object({
+  id: ID,
+  displayName: z.string().max(100).default(""),
+  enabled: z.boolean().default(true),
+  // Read access only, and nothing unless listed. Same rule as New key.
+  reads: z.array(z.object({ credentialId: ID, queryParams: z.array(QUERY_KEY).max(50).default([]) })).max(100).default([]),
+});
 
 // ---------------------------------------------------------------------------
 // Policy and state
@@ -92,12 +148,45 @@ async function loadPolicy(): Promise<{ policy: BrokerPolicy | null; error: strin
   }
 }
 
+/** Tells brokers running with BROKER_HOT_RELOAD=1 that policy or keys changed. Best effort. */
+async function notifyReload(): Promise<void> {
+  try {
+    await touchReloadMarker(reloadMarker);
+  } catch {
+    // A broker without hot reload ignores the marker anyway.
+  }
+}
+
 /** Write via a temp file and keep one backup, so a crash never truncates the policy. */
 async function writePolicy(text: string): Promise<void> {
+  // A fresh BROKER_POLICY_FILE may point into a folder that does not exist yet.
+  await mkdir(dirname(policyFile), { recursive: true });
   if (existsSync(policyFile)) await copyFile(policyFile, `${policyFile}.bak`);
-  const temp = `${policyFile}.tmp-${process.pid}`;
-  await writeFile(temp, text, { encoding: "utf8", mode: 0o600 });
-  await rename(temp, policyFile);
+  await writeAtomic(policyFile, text);
+  await notifyReload();
+}
+
+async function readPause() {
+  return readPauseFile(pauseFile);
+}
+
+/**
+ * Replace a file through a fresh temp name in the same folder. "wx" refuses to
+ * write through anything already at that name, such as a planted link. The
+ * 0600 mode applies on POSIX; Windows relies on the folder's ACLs.
+ */
+async function writeAtomic(file: string, text: string): Promise<void> {
+  const temp = `${file}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  await writeFile(temp, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  await rename(temp, file);
+}
+
+async function readKeyMeta() {
+  return parseKeyMeta(existsSync(keyNotesFile) ? await readFile(keyNotesFile, "utf8") : null);
+}
+
+async function writeKeyMeta(file: ReturnType<typeof parseKeyMeta>): Promise<void> {
+  await writeAtomic(keyNotesFile, serializeKeyMeta(file));
 }
 
 function secretSource(credential: CredentialSpec, stored: Map<string, string>): "env" | "keychain" | "missing" {
@@ -108,8 +197,35 @@ function secretSource(credential: CredentialSpec, stored: Map<string, string>): 
 async function buildState(): Promise<object> {
   const { policy, error, exists } = await loadPolicy();
   const stored = new Map((store ? await store.list() : []).map((k) => [k.id, k.comment]));
+  const meta = await readKeyMeta();
+  const now = new Date();
+  const usage = summarizeUsage(await readAuditLines(auditFile), now);
+  const pause = await readPause();
+  const approvals = (await readApprovals()).map((a) => ({
+    id: a.id,
+    agentId: a.agent_id,
+    credentialId: a.credential_id,
+    operationId: a.operation_id,
+    expiresAt: a.expires_at,
+    state: approvalState(a, now),
+  }));
+  const metaFor = (id: string) => {
+    const entry = meta.keys[id];
+    const status = expiryStatus(entry?.expires ?? null, now);
+    return {
+      expires: entry?.expires ?? null,
+      userNote: entry?.note ?? "",
+      rotatedAt: entry?.rotatedAt ?? null,
+      expiryState: status.state,
+      expiryDays: status.days,
+    };
+  };
   const credentials = policy
     ? [...policy.credentials.values()].map((c) => ({
+        ...metaFor(c.id),
+        usage: usage.get(c.id) ?? null,
+        manageUrl: findPresetByOrigin(c.baseUrl)?.keysUrl ?? null,
+        paused: pause.state.credentials[c.id] !== undefined,
         id: c.id,
         description: c.description,
         kind: c.kind,
@@ -127,23 +243,91 @@ async function buildState(): Promise<object> {
     policyFile,
     policyExists: exists,
     policyError: error,
-    keychain: store ? "Windows Credential Manager" : null,
+    keychain: store ? store.name : null,
     maxSecretBytes: MAX_SECRET_BYTES,
     credentials,
     // Keys housed in the keychain that no API in the policy uses yet.
     storedOnly: [...stored]
       .filter(([id]) => !policy?.credentials.has(id))
-      .map(([id, note]) => ({ id, note }))
+      .map(([id, note]) => ({ ...metaFor(id), id, note }))
       .sort((a, b) => a.id.localeCompare(b.id)),
+    expiryWarningDays: EXPIRY_WARNING_DAYS,
+    usageWindowDays: USAGE_WINDOW_DAYS,
+    pause: {
+      active: anyPauseActive(pause.state) || pause.unreadable,
+      unreadable: pause.unreadable,
+      all: pause.state.all,
+      agents: pause.state.agents,
+      credentials: pause.state.credentials,
+    },
+    approvals,
+    // Operations the policy marks as needing an approval, per agent and credential.
+    approvable: policy
+      ? [...policy.agents.values()].flatMap((a) =>
+          effectiveCredentialIds(policy, a.id).flatMap((credentialId) =>
+            (effectiveGrant(policy, a.id, credentialId)?.operations ?? [])
+              .filter((o) => o.requiresApproval)
+              .map((o) => ({ agentId: a.id, credentialId, operationId: o.id, method: o.method, path: o.path })),
+          ),
+        )
+      : [],
     agents,
     groups: policy ? [...policy.groups].map(([id, members]) => ({ id, members })) : [],
     register: {
       stdioEntry,
+      launch,
       policyFile,
       auditFile,
       approvalsFile,
+      pauseFile,
+      reloadMarker,
     },
+    paths: { policyFile, auditFile, approvalsFile, pauseFile, keyNotesFile, reloadMarker },
+    version: packageVersion,
+    platform: process.platform,
+    // Known providers for the New key picker. A fixed table; never agent-supplied.
+    providers: listPresets().map((p) => ({
+      id: p.id,
+      label: p.label,
+      baseUrl: p.baseUrl,
+      kind: p.kind,
+      paramName: p.paramName ?? null,
+      testPath: p.testPath ?? null,
+      keysUrl: findPresetByOrigin(p.baseUrl)?.keysUrl ?? null,
+    })),
   };
+}
+
+const MAX_ACTIVITY_RECORDS = 2000;
+
+/**
+ * Recent audit records for the Activity page. The audit is content-free by
+ * design; only these fixed fields are ever sent, so nothing an upstream or an
+ * agent wrote can reach the page from here.
+ */
+async function recentActivity(): Promise<object> {
+  const records: object[] = [];
+  for (const text of await readAuditLines(auditFile)) {
+    if (!text.trim()) continue;
+    let line: Record<string, unknown>;
+    try {
+      line = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const str = (k: string): string => (typeof line[k] === "string" ? (line[k] as string) : "");
+    records.push({
+      at: str("at"),
+      agentId: str("agentId"),
+      credentialId: str("credentialId"),
+      method: str("method"),
+      host: str("host"),
+      pathname: str("pathname"),
+      outcome: str("outcome"),
+      status: typeof line["status"] === "number" ? line["status"] : null,
+    });
+  }
+  return { records: records.slice(-MAX_ACTIVITY_RECORDS).reverse() };
 }
 
 /** Pasted keys often carry a trailing newline or a copied "Bearer " prefix. */
@@ -184,14 +368,80 @@ async function saveSecret(body: unknown): Promise<object> {
   const input = saveSecretSchema.parse(body);
   const value = cleanSecret(input.value);
   if (!value) throw new HttpError(400, "Paste a key first.");
-  await requireStore().set(input.credentialId, value);
+  const keychain = requireStore();
+  const replacing = (await keychain.list()).some((k) => k.id === input.credentialId);
+  await keychain.set(input.credentialId, value);
+  if (replacing) await writeKeyMeta(markRotated(await readKeyMeta(), input.credentialId));
+  await notifyReload();
+  return { ok: true, rotated: replacing };
+}
+
+async function saveMeta(body: unknown): Promise<object> {
+  const input = metaSchema.parse(body);
+  try {
+    await writeKeyMeta(applyMetaUpdate(await readKeyMeta(), input.credentialId, { expires: input.expires, note: input.note }));
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
   return { ok: true };
 }
 
 async function deleteSecret(body: unknown): Promise<object> {
   const input = credentialRefSchema.parse(body);
   const removed = await requireStore().delete(input.credentialId);
+  await notifyReload();
   return { ok: true, removed };
+}
+
+async function setPause(body: unknown): Promise<object> {
+  const input = pauseRequestSchema.parse(body);
+  // The global switch needs the typed word. This guards against a stray click in
+  // the page. It is not a security boundary: anyone holding the session token
+  // can send it, and so can anyone who can write the pause file.
+  if (input.scope.kind === "all" && !confirmationMatches(input.confirm, input.active)) {
+    throw new HttpError(400, input.active ? "Type PAUSE to confirm." : "Type RESUME to confirm.");
+  }
+  await changePause({ file: pauseFile, auditFile, source: "page" }, input);
+  return { ok: true };
+}
+
+const approvalCreateSchema = z.object({
+  agentId: ID,
+  credentialId: ID,
+  operationId: ID,
+  minutes: z.number().int().min(1).max(24 * 60),
+});
+const approvalRevokeSchema = z.object({ approvalId: z.string().min(1).max(128) });
+
+async function readApprovals() {
+  return parseApprovals(existsSync(approvalsFile) ? await readFile(approvalsFile, "utf8") : null);
+}
+
+async function createApprovalEntry(body: unknown): Promise<object> {
+  const input = approvalCreateSchema.parse(body);
+  const { policy } = await loadPolicy();
+  if (!policy) throw new HttpError(409, "Fix the policy file first.");
+  // Only an operation the policy already marks as needing approval can be approved.
+  const grant = effectiveGrant(policy, input.agentId, input.credentialId);
+  const operation = grant?.operations.find((o) => o.id === input.operationId);
+  if (!operation?.requiresApproval) {
+    throw new HttpError(400, "That operation does not exist for this agent, or does not require an approval.");
+  }
+  try {
+    const { entries, created } = createApproval(pruneApprovals(await readApprovals(), 7), input);
+    await writeAtomic(approvalsFile, serializeApprovals(entries));
+    return { ok: true, approvalId: created.id, expiresAt: created.expires_at };
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function revokeApprovalEntry(body: unknown): Promise<object> {
+  const input = approvalRevokeSchema.parse(body);
+  const next = revokeApproval(await readApprovals(), input.approvalId);
+  if (!next) throw new HttpError(404, "No approval with that id.");
+  await writeAtomic(approvalsFile, serializeApprovals(next));
+  return { ok: true };
 }
 
 async function addCredential(body: unknown): Promise<object> {
@@ -230,11 +480,39 @@ async function addCredential(body: unknown): Promise<object> {
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : String(error));
   }
+  // Validate expiry and note before anything is written, so a typo in the
+  // date cannot leave a saved key with no policy entry.
+  let nextMeta: ReturnType<typeof parseKeyMeta> | null = null;
+  if (input.expires || input.userNote) {
+    try {
+      nextMeta = applyMetaUpdate(await readKeyMeta(), input.id, { expires: input.expires ?? null, note: input.userNote ?? "" });
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : String(error));
+    }
+  }
   // Store the key before touching the policy: a failed keychain write
   // leaves nothing half-done.
   if (value) await requireStore().set(input.id, value);
   await writePolicy(text);
+  if (nextMeta) await writeKeyMeta(nextMeta);
   return { ok: true, envVar: envVarFor(input.id) };
+}
+
+/**
+ * Adds a policy agent with no grants beyond the reads chosen. Goes through the
+ * same policy-save path as adding a key (validated by parseBrokerPolicy, atomic
+ * write with a backup, reload marker). Never touches a secret.
+ */
+async function addAgent(body: unknown): Promise<object> {
+  const input = addAgentSchema.parse(body);
+  let text: string;
+  try {
+    text = addAgentToPolicy(await readPolicyText(), { id: input.id, displayName: input.displayName.trim(), enabled: input.enabled, reads: input.reads });
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : String(error));
+  }
+  await writePolicy(text);
+  return { ok: true, agentId: input.id, reads: input.reads.length };
 }
 
 type Probeable = Pick<CredentialSpec, "baseUrl" | "origin" | "kind" | "paramName">;
@@ -347,7 +625,7 @@ async function applyImport(body: unknown): Promise<object> {
       continue;
     }
     if (Buffer.byteLength(row.value, "utf8") > MAX_SECRET_BYTES) {
-      results.push({ rowId: item.rowId, id: item.id, ok: false, message: `Too long for Credential Manager (over ${MAX_SECRET_BYTES} bytes).` });
+      results.push({ rowId: item.rowId, id: item.id, ok: false, message: `Too long for the keychain (over ${MAX_SECRET_BYTES} bytes).` });
       continue;
     }
     let nextText = text;
@@ -396,6 +674,7 @@ async function applyImport(body: unknown): Promise<object> {
   }
 
   if (policyChanged && text !== null) await writePolicy(text);
+  else if (results.some((r) => r.ok)) await notifyReload();
 
   // Prove each new API key works, now that the policy is on disk.
   if (policyChanged && text !== null) {
@@ -418,14 +697,16 @@ async function applyImport(body: unknown): Promise<object> {
 // HTTP plumbing
 // ---------------------------------------------------------------------------
 
-function send(res: ServerResponse, status: number, contentType: string, payload: string): void {
+/** A fresh CSP nonce per page load. Only the page itself carries scripts or styles. */
+function send(res: ServerResponse, status: number, contentType: string, payload: string, nonce: string | null = null): void {
+  const scripts = nonce ? `'nonce-${nonce}'` : "'none'";
   res.writeHead(status, {
     "content-type": contentType,
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
-    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "content-security-policy": `default-src 'none'; script-src ${scripts}; style-src ${scripts}; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   });
   res.end(payload);
 }
@@ -477,12 +758,52 @@ function touch(): void {
 const routes: Record<string, (body: unknown) => Promise<object>> = {
   "POST /api/secret": saveSecret,
   "POST /api/secret/delete": deleteSecret,
+  "POST /api/meta": saveMeta,
+  "POST /api/pause": setPause,
+  "POST /api/approvals/create": createApprovalEntry,
+  "POST /api/approvals/revoke": revokeApprovalEntry,
   "POST /api/credential": addCredential,
+  "POST /api/agent": addAgent,
   "POST /api/test": testCredential,
   "POST /api/state": () => buildState(),
+  "POST /api/activity": () => recentActivity(),
   "POST /api/import/scan": scanImport,
   "POST /api/import/apply": applyImport,
 };
+
+/**
+ * An agent's request to add a key (broker_request_credential) reaches this
+ * process as untrusted JSON in the environment. Only a validated name, a short
+ * reason and the requester's name are kept; the address and key style come
+ * from the known-provider table, never from the agent. The result rides in
+ * the URL fragment, which the browser never sends anywhere.
+ */
+const requestSchema = z.object({
+  credentialId: ID,
+  reason: z.string().trim().max(200),
+  requestedBy: ID,
+  provider: ID.optional(),
+});
+
+function buildPrefill(): string | null {
+  const raw = process.env.BROKER_KEYS_REQUEST;
+  if (!raw) return null;
+  try {
+    const request = requestSchema.parse(JSON.parse(raw));
+    const preset = request.provider ? findPresetById(request.provider) : null;
+    const prefill = {
+      id: request.credentialId,
+      reason: request.reason,
+      requestedBy: request.requestedBy,
+      preset: preset
+        ? { label: preset.label, baseUrl: preset.baseUrl, kind: preset.kind, paramName: preset.paramName ?? null }
+        : null,
+    };
+    return Buffer.from(JSON.stringify(prefill), "utf8").toString("base64url");
+  } catch {
+    return null;
+  }
+}
 
 const server = createServer((req, res) => {
   void (async () => {
@@ -495,7 +816,20 @@ const server = createServer((req, res) => {
     const path = (req.url ?? "/").split("?")[0];
 
     if (req.method === "GET" && path === "/") {
-      send(res, 200, "text/html; charset=utf-8", renderKeysPage(nonce));
+      const nonce = randomBytes(16).toString("base64");
+      send(res, 200, "text/html; charset=utf-8", renderPage(nonce), nonce);
+      return;
+    }
+    if (req.method === "GET" && path === "/ui/app.css") {
+      send(res, 200, "text/css; charset=utf-8", UI_FILES.css);
+      return;
+    }
+    if (req.method === "GET" && (path === "/ui/app.js" || path === "/ui/logic.js")) {
+      send(res, 200, "text/javascript; charset=utf-8", path === "/ui/app.js" ? UI_FILES.app : UI_FILES.logic);
+      return;
+    }
+    if (req.method === "GET" && (path === "/ui/broker-mark.svg" || path === "/ui/broker-routing.svg")) {
+      send(res, 200, "image/svg+xml", path === "/ui/broker-mark.svg" ? UI_FILES.mark : UI_FILES.routing);
       return;
     }
     if (req.method === "POST" && path === "/api/close") {
@@ -554,10 +888,11 @@ server.on("error", (error: NodeJS.ErrnoException) => {
 
 server.listen(requestedPort, "127.0.0.1", () => {
   const { port } = server.address() as AddressInfo;
-  const url = `http://127.0.0.1:${port}/#${token}`;
+  const prefill = buildPrefill();
+  const url = `http://127.0.0.1:${port}/#${token}${prefill ? `.${prefill}` : ""}`;
   console.log("Credential Broker key manager");
   console.log(`Policy: ${policyFile}`);
-  console.log(`Keys:   ${store ? "Windows Credential Manager" : "no keychain on this platform; use env vars"}`);
+  console.log(`Keys:   ${store ? store.name : "no keychain on this platform; use env vars"}`);
   console.log(`\nOpen:   ${url}\n`);
   console.log("Press Ctrl+C to stop. Closes itself after 30 minutes idle.");
   touch();

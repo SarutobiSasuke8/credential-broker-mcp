@@ -166,6 +166,8 @@ agents:
     BROKER_AGENT_ID: "proof-reader", BROKER_POLICY_FILE: policyFile,
     BROKER_AUDIT_FILE: auditFile, BROKER_APPROVALS_FILE: approvalsFile,
     BROKER_PROOF_SECRET: secret, BROKER_PROOF_FOREIGN: foreignSecret,
+    // The proof never touches a real keychain on any platform.
+    BROKER_KEYCHAIN: "off",
   });
 
   await t.test("missing and unknown launcher identities fail closed", async () => {
@@ -267,5 +269,46 @@ agents:
         (error) => error.code === 1 && reason.test(error.stderr));
     }
   });
+  await t.test("the pause and key manager binaries start and exit cleanly from the installed package", async () => {
+    await writeFile(policyFile, policy);
+    const pauseEntry = path.join(installed, manifest.bin["credential-broker-pause"]);
+    const keysEntry = path.join(installed, manifest.bin["credential-broker-keys"]);
+    const run = (args) => exec(process.execPath, [pauseEntry, ...args], { cwd: consumer, env, timeout: 10_000, windowsHide: true });
+
+    assert.match((await run(["status"])).stdout, /Nothing is paused/u);
+    assert.match((await run(["on", "--yes"])).stdout, /all agent access is now PAUSED/u);
+    await assert.rejects(run(["status"]), (error) => error.code === 1 && /ALL agent access is paused/u.test(error.stdout));
+    assert.match((await run(["off"])).stdout, /all agent access is now resumed/u);
+    // Resuming never deletes the switch file.
+    const pauseState = JSON.parse(await readFile(path.join(consumer, "pause.json"), "utf8"));
+    assert.equal(pauseState.all, null);
+    assert.ok(pauseState.resumed.length > 0);
+
+    const keys = spawn(process.execPath, [keysEntry, "--no-open"], {
+      cwd: consumer, env: { ...env, BROKER_KEYCHAIN: "off", BROKER_KEYS_PORT: "0" }, stdio: "pipe", windowsHide: true,
+    });
+    const closed = new Promise((resolve) => keys.on("close", resolve));
+    let printed = "";
+    const url = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`key manager printed no URL: ${printed}`)), 15_000);
+      keys.stdout.on("data", (chunk) => {
+        printed += chunk;
+        const hit = /Open:\s+(http:\/\/127\.0\.0\.1:\d+\/#[0-9a-f]+)/u.exec(printed);
+        if (hit) { clearTimeout(timer); resolve(hit[1]); }
+      });
+      keys.on("close", (code) => { clearTimeout(timer); reject(new Error(`key manager exited early (${code})`)); });
+    });
+    const [base, token] = url.split("#");
+    const page = await fetch(base);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("content-security-policy"), /default-src 'none'/u);
+    assert.doesNotMatch(await page.text(), new RegExp(token, "u"), "the token travels only in the fragment");
+    const unauthenticated = await fetch(`${base}api/state`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(unauthenticated.status, 401);
+    const close = await fetch(`${base}api/close`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: "{}" });
+    assert.equal(close.status, 200);
+    assert.equal(await closed, 0, "the key manager exits cleanly when asked to close");
+  });
+
   t.diagnostic(`Packaged ${manifest.name}@${manifest.version}; tarball integrity ${packed.integrity}`);
 });

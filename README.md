@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/SarutobiSasuke8/credential-broker-mcp/main/src/ui/broker-mark.svg" alt="" width="56" height="56">
+
 # Credential Broker MCP
 
 A local-first MCP server that lets AI agents use gated APIs **without ever
@@ -14,8 +16,76 @@ An upstream that transforms a secret with a one-way function of its own
 defeats string matching; scoped operations and metadata-only responses are
 the defence there, and SECURITY.md states this boundary honestly.
 
-> **Pre-release.** Nothing is published to npm yet. Treat `main` as a work
-> in progress until a tagged `v0.1.0` exists.
+[![npm](https://img.shields.io/npm/v/@sarutobi-sasuke/credential-broker-mcp)](https://www.npmjs.com/package/@sarutobi-sasuke/credential-broker-mcp)
+[![provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/@sarutobi-sasuke/credential-broker-mcp#provenance)
+[![licence](https://img.shields.io/npm/l/@sarutobi-sasuke/credential-broker-mcp)](LICENSE)
+
+> **Early release (0.x).** Published to npm with provenance from GitHub
+> Actions. Expect the policy format and tools to change before 1.0.
+
+## Five-minute quickstart
+
+Needs Node 22 or 24. Keys are stored in the OS keychain: Windows Credential
+Manager, the macOS login keychain, or the Secret Service on Linux
+(GNOME Keyring or KWallet through `secret-tool`). Without one, set each
+credential's `env_var` instead.
+
+1. **Open the key manager.** It prints a local link and opens it in your
+   browser.
+
+   ```bash
+   npx -y -p @sarutobi-sasuke/credential-broker-mcp credential-broker-keys
+   ```
+
+   Run through `npx`, the policy, audit log and approvals live in
+   `~/.credential-broker` (`%USERPROFILE%\.credential-broker` on Windows), so
+   they survive npm cache clean-ups and upgrades. Set `BROKER_HOME`, or
+   `BROKER_POLICY_FILE`, `BROKER_AUDIT_FILE` and `BROKER_APPROVALS_FILE`, to
+   put them somewhere else. From a clone of this repo, run `npm ci` then
+   `npm run keys`; the files then stay in the checkout.
+
+2. **Add one key.** Open **New key**. Use the short name `github`, base URL
+   `https://api.github.com`, paste a token, tick the agent that may use it
+   (or add an identity such as `codex`), then press **Add key**. The key goes
+   into your OS keychain and the policy file gets a read-only grant. Press
+   **Test** on the card to prove the key works.
+
+3. **Connect your MCP client.** Go to **Settings → Connect an MCP client**,
+   select **Codex** or **Claude Code**, then pick the agent. For Codex, paste
+   the copied TOML into `~/.codex/config.toml` or update the existing
+   `credential-broker` entry. For Claude Code, run the copied command.
+   Restart your client. Both options use local stdio and require Node on PATH.
+   The Codex configuration also applies to local sessions in the ChatGPT
+   desktop app on the same host. If you use environment-backed credentials,
+   list the variable names in `env_vars` under the Codex server table.
+   See the [Codex MCP configuration guide](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+4. **Make a granted call and a denied call.** In your client:
+
+   > Use `broker_explain_request` for a GET to
+   > `https://api.github.com/repos/octocat/hello-world` with credential `github`.
+
+   It answers *allowed* and names the deciding rule. Now ask the same with
+   `DELETE`: *denied*, no grant. Then ask for `broker_read` on the GET and
+   you get the response body with the token redacted wherever it might
+   appear. The audit log (`data/audit.jsonl`) now holds the who, what and
+   outcome, never the content.
+
+5. **Pause and resume.** Press **Pause all access** in the page header and
+   type `PAUSE`. The agent's next call is refused with a message not to
+   retry. Press **Resume all access** and type `RESUME`. From a terminal:
+   `npm run pause -- on` and `npm run pause -- off`.
+
+### ChatGPT web
+
+The broker's native connection is local stdio. For a private ChatGPT
+integration, an eligible workspace can connect through [OpenAI Secure MCP
+Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels),
+with the tunnel client launching the broker under a dedicated policy identity.
+Run the tunnel client under the OS account that owns the keys and keep the
+key manager on loopback. This connection needs its own workspace setup and
+verification. Public distribution as a local ChatGPT desktop plugin is
+[limited to approved partners](https://developers.openai.com/plugins/deploy/desktop-only).
 
 ## Why
 
@@ -48,6 +118,7 @@ capability":
 | `broker_explain_request` | Dry run: would this request be permitted, which rule decides it, and is an approval required or satisfied? No upstream call, no secret touched. |
 | `broker_read` | GET or HEAD through a granted credential. Honestly annotated read-only. |
 | `broker_mutate` | POST, PUT, PATCH, or DELETE. Annotated destructive and non-idempotent, because its strongest capability is. May require an approval and an idempotency key. |
+| `broker_request_credential` | Opt-in (`BROKER_ALLOW_KEY_REQUESTS=1`). Asks the operator for a key by opening the key manager pre-filled. The agent never sees the page, the token or the key. |
 
 ## Policy (version 2)
 
@@ -179,7 +250,7 @@ principal's secrets and scrubs every policy credential variable from its
 environment after loading. One broker process serves one principal; never
 share a process between agents.
 
-## Managing keys (Windows)
+## Managing keys
 
 ```bash
 npm install
@@ -189,8 +260,8 @@ npm run keys
 This opens a local page in your browser where you:
 
 - **Add an API**: name, base URL, how the key is sent, paste the key, then
-  choose individual agents or group shortcuts. The key goes into Windows
-  Credential Manager; the policy file gets persistent group assignments and
+  choose individual agents or group shortcuts. The key goes into the OS
+  keychain; the policy file gets persistent group assignments and
   separate read-only grants for individually selected agents (GET on any path under the
   base URL, only the query parameters you list).
 - **Save, replace, test, or remove a key** for any API already in the
@@ -205,11 +276,26 @@ This opens a local page in your browser where you:
   and are tested straight away; anything else is stored only. Values are
   read by the key manager process and never sent to the page. Wallet keys
   are flagged and never offered as APIs. Original copies are not touched.
+- **Add an agent** (Agents page): id, display name, enabled, and which
+  APIs it may read. A new agent starts with no access at all; only the
+  APIs you tick become read grants. No key is involved.
 - **Copy the `claude mcp add` command** that registers the broker for an
-  agent with absolute paths filled in.
+  agent with absolute paths filled in (Settings page).
+
+A key saved in the keychain that no API in the policy uses is listed on
+the Keys page under **Not connected to an agent yet**, with a
+**Connect to an API** action; no agent can use it until then.
+
+The page is a small site: a sticky header with the page links (Overview,
+Keys, Agents, Approvals, Activity, Import, Settings; a menu button on
+narrow screens), search (`/` or `Ctrl+K`), a **New key** button, the
+pause control and a status chip. Activity is the content-free audit log,
+with filters and CSV export. It follows your system's
+light or dark theme, works with the keyboard alone, and is served entirely
+by the key manager on loopback: no external script, style, font or image.
 
 Write access (POST, PUT, PATCH, DELETE) is never granted from the page;
-add those operations to the policy by hand. Restart the MCP client after
+add those operations to the policy by hand. Restart the MCP client (or set `BROKER_HOT_RELOAD=1`, see below) after
 changing a key, because the broker loads keys once at start-up.
 
 Optional top-level `groups:` in `broker.yaml` maps a name to registered agent
@@ -223,11 +309,119 @@ Membership alone grants nothing; a matching `group_grants:` entry is required.
 Group and direct denials are combined, and group mutations must require
 approval. The key cards show groups actually assigned to each credential.
 
-Keys live in Control Panel > Credential Manager > Windows Credentials as
-`credential-broker/<credential-id>`. An `env_var` value, if set, overrides
+Keys live in the OS keychain as `credential-broker/<credential-id>`: on
+Windows in Control Panel > Credential Manager > Windows Credentials, on
+macOS in the login keychain (Keychain Access shows them under that
+service name), on Linux in the Secret Service (Seahorse or KWallet
+Manager shows them with the `credential-broker` attribute). The macOS and
+Linux backends drive the `security` and `secret-tool` commands and send
+the key over stdin, never on a command line; they are unit tested against
+a fake and still need a real round trip on each platform before you rely
+on them. An `env_var` value, if set, overrides
 the stored key. The page listens on 127.0.0.1 only, needs a per-run token
 from the printed link, and closes after 30 minutes idle. On other
 platforms, set each credential's `env_var` instead.
+
+### Expiry dates and notes
+
+Each key can carry an expiry date and a free-text note (where it was created,
+how to rotate it). They are kept in `key-notes.json` beside the policy file
+(override with `BROKER_KEY_NOTES_FILE`), never in the policy and never with the
+secret. Keys that are expired or expire within 30 days raise a banner, sort
+first, and show a badge on their card. Nothing in the broker engine reads this
+file, so a date never blocks a request; it is a reminder for you.
+
+### Letting an agent ask for a key
+
+Set `BROKER_ALLOW_KEY_REQUESTS=1` on a broker process to give that agent the
+`broker_request_credential` tool. The agent supplies a lowercase name, a short
+reason and, optionally, a known provider id (for example `github`, `openai`,
+`itch`). The broker then opens the key manager in your browser, pre-filled with
+the name and the reason, with a banner saying which agent asked.
+
+- The agent never receives the page address, the session token or anything you
+  type. The tool result says only that a window opened.
+- The base URL and key style come from the broker's own table of known
+  providers, never from the agent. An unknown provider leaves them blank for you
+  to fill in, so an agent cannot steer a key to a host of its choosing.
+- Nothing is added until you press the button, and you choose who may use it.
+- Requests are limited to one per credential per 10 minutes and five an hour per
+  process, and each one writes a content-free audit line.
+- The broker loads keys when it starts, so restart the MCP client after saving.
+  The tool is off by default.
+
+### Panic button
+
+The header of the key manager has a red **Pause all access** button. It opens a
+dialog that says what will happen, shows how many agents and keys are affected,
+and asks you to type `PAUSE`. From then on every broker refuses every request on
+its next call. Nothing is deleted: policy, keys and approvals stay as they were.
+**Resume all access** asks you to type `RESUME`, because resuming is the risky
+direction. Pausing one agent (Agents panel) or one key (its card) asks a plain
+confirmation and then offers an eight second **Undo**; resuming one asks a
+confirmation.
+
+The typed word is a safeguard against a stray click in the page. It is not a
+security boundary: anyone who can write the policy directory can pause or
+resume, which is the same trust as editing the policy.
+
+From a terminal, when no browser is to hand, the command acts at once with no
+prompt, and prints exactly what it changed:
+
+```bash
+npm run pause -- on --reason "key leaked"            # everything
+npm run pause -- on --agent claude                   # one agent
+npm run pause -- on --credential github              # one key
+npm run pause -- off                                 # resume everything
+npm run pause -- status                              # exit code 1 while anything is paused
+```
+
+`--yes` is accepted so a script can say plainly that it means it; it changes
+nothing.
+
+The switch is the file `pause.json` beside the policy (override with
+`BROKER_PAUSE_FILE`). Brokers re-read it on every request, so it needs no
+restart, and it fails closed: a missing file means nothing is paused, but a file
+that exists and cannot be read pauses everything. Agents are told only that
+access is paused and not to retry; your typed reason stays private.
+
+Every pause and resume, from the page or the terminal, appends one line to the
+audit log: the scope, the direction, where it came from and when. The reason is
+never written there.
+
+**Tamper evidence.** Resuming never deletes `pause.json`; it writes a fresh
+file with an explicit resume record. A running broker remembers the last pause
+it enforced, so if that pause disappears (the file is deleted, emptied or
+replaced) without a matching resume record, the broker stays paused and writes
+a `PAUSE_TAMPER` audit line. Only a valid file carrying the resume releases it:
+run `npm run pause -- off`, or pause and resume once from the page. This catches
+accidents and casual meddling. A hostile process running as the same OS user
+can still write a valid file; the real protection against that is the
+secure-launch profile in [SECURITY.md](SECURITY.md).
+
+### Hot reload
+
+Set `BROKER_HOT_RELOAD=1` on a broker process and it picks up key manager
+changes (a new key, a new API, a changed grant) on the next request, with no
+restart. The key manager writes a small marker beside the policy after every
+change. If the new policy is invalid, the broker keeps its previous working
+state and writes an audit line. Off by default.
+
+Each opt-in control has a short page saying what it does and what it
+trusts: [pause](docs/pause.md), [hot reload](docs/hot-reload.md),
+[key requests](docs/key-requests.md), [approvals](docs/approvals.md).
+
+### Usage, rotation and approvals
+
+- Each key card shows when it was last used, by which agent, and how its last
+  30 days of requests ended, read from the content-free audit log.
+- Replacing a key records the date. For known providers a link opens the
+  provider's key page so you can revoke the old key.
+- The **Approvals** panel creates and revokes approvals for operations the
+  policy marks `requires_approval`, with a lifetime of 1 minute to 24 hours.
+  It cannot approve anything else, and it never grants write access itself.
+- About twenty providers are known (OpenAI, Anthropic, GitHub, Cloudflare,
+  Stripe, itch.io and others); picking one fills in the address and key style.
 
 ## Running
 
@@ -247,17 +441,27 @@ Environment:
 | `BROKER_APPROVALS_FILE` | Approval store path. Default `config/approvals.json`. |
 | `BROKER_KEYCHAIN` | `off` stops the broker and key manager reading Credential Manager. |
 | `BROKER_KEYS_PORT` | Fixed port for `npm run keys`. Default: a free port. |
+| `BROKER_KEY_NOTES_FILE` | Expiry dates and notes. Default `key-notes.json` beside the policy. |
+| `BROKER_PAUSE_FILE` | The pause switch. Default `pause.json` beside the policy. |
+| `BROKER_RELOAD_MARKER` | Hot reload marker. Default `.broker-reload` beside the policy. |
+| `BROKER_HOT_RELOAD` | `1` lets a running broker pick up key manager changes. Off by default. |
+| `BROKER_ALLOW_KEY_REQUESTS` | `1` enables `broker_request_credential` for this agent. Off by default. |
 | *(per credential)* | Each credential's `env_var` carries its secret, overriding a stored key. |
 
-Claude Code registration (once published; see the pre-release note above):
+Manual Claude Code registration from a checkout:
 
 ```json
 {
   "mcpServers": {
     "credential-broker": {
-      "command": "npx",
-      "args": ["-y", "@sarutobi-sasuke/credential-broker-mcp"],
-      "env": { "BROKER_AGENT_ID": "researcher" }
+      "command": "node",
+      "args": ["/absolute/path/to/credential-broker/dist/src/stdio.js"],
+      "env": {
+        "BROKER_AGENT_ID": "researcher",
+        "BROKER_POLICY_FILE": "/absolute/path/to/broker.yaml",
+        "BROKER_AUDIT_FILE": "/absolute/path/to/audit.jsonl",
+        "BROKER_APPROVALS_FILE": "/absolute/path/to/approvals.json"
+      }
     }
   }
 }
@@ -267,16 +471,19 @@ Claude Code registration (once published; see the pre-release note above):
 
 Run `npm run check` for types, lint and unit tests, `npm run verify:pack`
 for the package allowlist, and `npm run test:e2e` for the installed-server
-proof. CI runs these on Windows and Linux with Node 22 and 24.
+proof. CI runs these on Windows, macOS and Linux with Node 22 and 24.
 
 The end-to-end test packs the project, installs the tarball into an empty
 directory and starts its declared stdio executable. Synthetic credentials
 and a loopback HTTP API exercise tool discovery, principal-scoped grants,
 denials before upstream calls, response redaction, metadata-only responses,
-approval revocation and content-free audits. No production credential,
-OS keychain entry or external API is used. This does not verify the key
-manager UI, secure-launch deployment, independent operator workflows or
-the eventual npm-hosted artifact.
+approval revocation and content-free audits. It also runs the installed
+`credential-broker-pause` binary through pause, status and resume, and
+starts `credential-broker-keys`, checks its CSP and token gate, and closes
+it. No production credential, OS keychain entry or external API is used.
+This does not verify the key manager page in a browser, secure-launch
+deployment, independent operator workflows or the eventual npm-hosted
+artifact.
 
 Idempotency keys are required and recorded when the policy says so. They
 are audit identifiers, not upstream deduplication: the broker neither
@@ -298,6 +505,40 @@ operator verification before a first publish.
 - Not a bypass. It delegates *through* existing gates with scoped-down
   authority; it does not defeat anything.
 
+## How it compares
+
+Other tools solve neighbouring problems. This section names only what was
+read on the projects' own pages on 2026-11-06; it is not a review of their
+security, and they may have moved on since.
+
+- **Hosted secrets managers with an MCP server**, such as
+  [Doppler's](https://docs.doppler.com/docs/mcp). Doppler's server is
+  described as experimental and intended for development and evaluation,
+  calls the Doppler API with an account token kept in the system keyring,
+  and lists "read secret values" among its tools. That is a different
+  shape: the manager hands values to the agent on request and relies on
+  token permissions. This broker never returns a value; the agent gets the
+  result of a scoped call, and nothing leaves the machine.
+- **Governance gateways**, such as
+  [Agenthof](https://github.com/agenthof/agenthof) (Apache-2.0, Go,
+  pre-release). It injects per-role or per-resource credentials the agent
+  never holds, grants access per named tool or resource, and keeps a
+  hash-chained audit ledger attributed to the human who asked. It is a
+  broader control plane with OIDC human identity. This broker is narrower:
+  one process per agent, one YAML file, per-operation method and path
+  grants, no identity provider, no server to run.
+- **Credential-proxy MCP servers** that follow the same "the agent calls
+  through a process that holds the key" pattern exist (for example Janee
+  and pincer-mcp appear in directories). Their pages could not be read for
+  this section, so nothing is claimed about them here.
+
+Where this broker is deliberately small: it brokers static keys you
+already hold, it has no OAuth flows yet, no rate limits beyond key
+requests, and no hosted or multi-user mode. Where it is deliberately
+strict: deny by default per operation, a single decision function for
+explain and execute, secrets redacted in every representation it creates,
+a content-free audit, and operator controls that only ever narrow access.
+
 ## Roadmap
 
 - [ ] OAuth 2.1 device and refresh flows for credentials that expire
@@ -305,8 +546,10 @@ operator verification before a first publish.
   expiring principal tokens through the same engine, matching
   [agent-handoff-mcp](https://github.com/SarutobiSasuke8/agent-handoff-mcp)
 - [ ] Per-credential rate limits and spend counters
-- [x] Key manager page: provision, replace, test, and remove keys (Windows)
-- [ ] Keychain backends for macOS and Linux
+- [x] Key manager page: provision, replace, test, and remove keys
+- [x] Keychain backends for macOS (`security`) and Linux (`secret-tool`),
+  unit tested with a faked command runner; real round trips on a Mac and a
+  Linux desktop are still to be confirmed by hand
 - [ ] Operator CLI: approve, rotate
 
 ## Licence

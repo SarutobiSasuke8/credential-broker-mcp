@@ -3,9 +3,45 @@ import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { AuditLogger } from "./audit.js";
 import { FileApprovalStore, loadPrincipalSecrets } from "./engine.js";
+import { FilePauseGuard, pauseFilePath } from "./kill-switch.js";
+import { KeyRequester, spawnKeyManagerLauncher } from "./key-request.js";
 import { platformSecretStore } from "./keychain.js";
 import { loadBrokerPolicy } from "./policy.js";
+import { pauseStateFromAudit } from "./pause-admin.js";
+import { ReloadWatcher, reloadMarkerPath, revokedIdentityPolicy } from "./reload.js";
 import { createBrokerMcpServer } from "./server.js";
+import { readAuditLines } from "./usage.js";
+
+import type { AuditRecord } from "./audit.js";
+import type { SecretProvider } from "./engine.js";
+import type { PauseFileEvent } from "./kill-switch.js";
+import type { BrokerPolicy } from "./types.js";
+
+function reloadRecord(agent: string, detail: string): AuditRecord {
+  return {
+    traceId: `reload-${Date.now().toString(36)}`,
+    agentId: agent,
+    credentialId: "-",
+    method: "RELOAD",
+    host: "broker.local",
+    pathname: "/",
+    outcome: "requested",
+    detail,
+  };
+}
+
+function pauseFileRecord(agent: string, kind: PauseFileEvent["kind"], detail: string): AuditRecord {
+  return {
+    traceId: `pause-file-${Date.now().toString(36)}`,
+    agentId: agent,
+    credentialId: "-",
+    method: kind === "released" ? "PAUSE_RELEASED" : "PAUSE_TAMPER",
+    host: "broker.local",
+    pathname: "/pause",
+    outcome: kind === "released" ? "requested" : "denied",
+    detail,
+  };
+}
 
 /**
  * Stdio transport. The identity here is a trusted-launcher assertion: the
@@ -32,17 +68,59 @@ if (!policy.agents.has(agentId)) {
 // from the process environment so child processes and later code cannot
 // read them back. Credentials the environment leaves unset are read from the
 // OS keychain, where the key manager (npm run keys) stores them.
-const secrets = await loadPrincipalSecrets(policy, agentId, {
-  scrubEnv: true,
-  keychain: platformSecretStore(),
-});
+// Keep the credential variables the environment supplied, so a hot reload can
+// rebuild the same secrets after the scrub below has removed them from
+// process.env. The values stay in this process only.
+const envSnapshot: Record<string, string | undefined> = {};
+for (const credential of policy.credentials.values()) envSnapshot[credential.envVar] = process.env[credential.envVar];
+
+const keychain = platformSecretStore();
+const secrets = await loadPrincipalSecrets(policy, agentId, { scrubEnv: true, keychain });
+const audit = new AuditLogger(auditFile);
+
+// Opt-in hot reload: pick up key manager changes without restarting the MCP
+// client. A failed reload keeps the previous working state.
+let refresh: (() => Promise<{ policy: BrokerPolicy; secrets: SecretProvider } | null>) | undefined;
+if (process.env.BROKER_HOT_RELOAD === "1") {
+  const watcher = new ReloadWatcher<{ policy: BrokerPolicy; secrets: SecretProvider }>({
+    markerFile: reloadMarkerPath(policyFile),
+    async load() {
+      let nextPolicy = await loadBrokerPolicy(policyFile);
+      if (!nextPolicy.agents.has(agentId)) {
+        // Removed from the policy means revoked, not "keep the old grants".
+        nextPolicy = revokedIdentityPolicy(nextPolicy, policy, agentId);
+        await audit.write(reloadRecord(agentId, "identity removed from the policy; every request is now denied until it is restored"));
+      }
+      const env: Record<string, string | undefined> = { ...envSnapshot };
+      for (const credential of nextPolicy.credentials.values()) env[credential.envVar] ??= process.env[credential.envVar];
+      return { policy: nextPolicy, secrets: await loadPrincipalSecrets(nextPolicy, agentId, { env, scrubEnv: false, keychain }) };
+    },
+    onReload: () => audit.write(reloadRecord(agentId, "policy and keys reloaded")),
+    onFailure: (message) => audit.write(reloadRecord(agentId, `reload failed, previous state kept: ${message.slice(0, 160)}`)),
+  });
+  await watcher.init();
+  refresh = () => watcher.refresh();
+}
+
+// The pause guard remembers the last pause it enforced. It starts from what
+// the audit log can prove, so a pause file deleted or replaced while this
+// process was down is still held, and the change is audited.
+const pauseGuard = new FilePauseGuard(pauseFilePath(policyFile), (event) => audit.write(pauseFileRecord(agentId, event.kind, event.detail)));
+pauseGuard.prime(pauseStateFromAudit(await readAuditLines(auditFile)));
 
 const mcpServer = createBrokerMcpServer(
   {
     policy,
-    audit: new AuditLogger(auditFile),
+    audit,
     secrets,
     approvals: new FileApprovalStore(approvalsFile),
+    // Always on: a missing pause file means nothing is paused, unless the
+    // audit log proves a pause that was never resumed.
+    pause: pauseGuard,
+    ...(refresh ? { refresh } : {}),
+    // Opt-in per process: lets this agent ask the operator for a key by
+    // opening the key manager. Off unless the operator sets the variable.
+    ...(process.env.BROKER_ALLOW_KEY_REQUESTS === "1" ? { keyRequests: new KeyRequester({ launcher: spawnKeyManagerLauncher() }) } : {}),
   },
   agentId,
 );

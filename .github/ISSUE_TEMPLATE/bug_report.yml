@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as the README says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **If this is a security problem, do not file it here.** Use the private route in SECURITY.md.
+        Never paste a real key, a real policy with real credential names, or a private path. Replace them with made-up values.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Policy (synthetic values only):
+        2. Command or tool call:
+        3. Result:
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version or commit
+      placeholder: "0.1.0, or a commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: "node --version"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Broker (stdio server, policy, engine)
+        - Key manager (npm run keys)
+        - Pause switch
+        - Hot reload or key requests
+        - Docs
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Audit lines, error messages or console output, with any secrets removed. The audit log is content-free by design, so it is normally safe to paste.
+      render: text

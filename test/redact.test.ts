@@ -78,3 +78,37 @@ void test("short and empty secrets do not create degenerate variants", () => {
   const r = new SecretRedactor(["", "ab"]);
   assert.equal(r.redact("nothing changes here ab-wise? actually 'ab' is too short"), "nothing changes here ab-wise? actually 'ab' is too short");
 });
+
+void test("truncation removes a fixed amount that does not depend on what the text ends with", () => {
+  const r = redactor();
+  const withPrefix = `padding padding ${SECRET.slice(0, 12)}`;
+  const withoutPrefix = `padding padding ${"x".repeat(12)}`;
+  const a = r.redactTruncated(withPrefix);
+  const b = r.redactTruncated(withoutPrefix);
+  assert.equal(a.length, b.length, "the cut must not reveal whether the tail was a secret prefix");
+  assert.ok(!a.includes(SECRET.slice(0, 4)));
+  assert.ok(a.endsWith("[REDACTED]") && b.endsWith("[REDACTED]"));
+  assert.equal(new SecretRedactor([]).redactTruncated("plain"), "plain", "no secrets, nothing to strip");
+});
+
+void test("Base64 of a wrapper that contains the secret at byte offset 1 or 2 is redacted", () => {
+  const r = redactor();
+  for (const wrapper of [`x${SECRET}`, `{"key":"${SECRET}"}`, `ab${SECRET}cd`, `"${SECRET}`]) {
+    const b64 = Buffer.from(wrapper, "utf8").toString("base64");
+    const out = r.redact(`echo ${b64} end`);
+    assert.ok(!out.includes(Buffer.from(SECRET, "utf8").toString("base64").slice(4, 16)), `leaked inside ${JSON.stringify(wrapper)}`);
+    assert.ok(out.includes("[REDACTED]"), `nothing redacted for ${JSON.stringify(wrapper)}`);
+    const url = Buffer.from(wrapper, "utf8").toString("base64url");
+    assert.ok(r.redact(url).includes("[REDACTED]"), `base64url leaked for ${JSON.stringify(wrapper)}`);
+  }
+});
+
+void test("JSON string escapes of a secret are redacted, including the escaped slash some encoders emit", () => {
+  const slashy = 'ab/cd"ef\\gh';
+  const r = new SecretRedactor([slashy]);
+  assert.ok(!r.redact(JSON.stringify({ k: slashy })).includes("ab"), "plain JSON escaping");
+  const escapedSlash = JSON.stringify(slashy).slice(1, -1).split("/").join("\\/");
+  const php = `{"k":"${escapedSlash}"}`;
+  assert.ok(php.includes("ab\\/cd"), "the fixture really carries an escaped slash");
+  assert.ok(!r.redact(php).includes("ab"), "escaped slash form");
+});
