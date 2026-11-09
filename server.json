@@ -3,7 +3,7 @@
   "name": "io.github.SarutobiSasuke8/credential-broker-mcp",
   "title": "Credential Broker",
   "description": "Local-first credential broker: agents use gated APIs through scoped, audited requests, never keys.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://github.com/SarutobiSasuke8/credential-broker-mcp#readme",
   "icons": [
     {
@@ -21,7 +21,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@sarutobi-sasuke/credential-broker-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "environmentVariables": [

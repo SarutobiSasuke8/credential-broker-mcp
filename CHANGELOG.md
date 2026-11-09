@@ -5,6 +5,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.1.2 - 2026-11-09
+
+### Security
+
+- Redaction now also covers a secret echoed as hex, and matches the raw,
+  hex and percent-encoded forms in any letter case. Before this, an
+  upstream that uppercased or hex-encoded a key could return it to the
+  agent. Base64 forms stay case-sensitive.
+
+### Documentation
+
+- `SECURITY.md` now states that a partial echo of a secret is not redacted,
+  and why.
+
 ## 0.1.1 - 2026-11-07
 
 ### Fixed

@@ -293,18 +293,44 @@ void test("an unexpected content type withholds the body", async () => {
 });
 
 void test("redirects are refused and never followed with the credential", async () => {
+  let hits = 0;
   await withUpstream(
     (_req, res) => {
+      hits += 1;
       res.statusCode = 302;
-      res.setHeader("location", "https://evil.example.com/");
-      res.end();
+      res.setHeader("location", `https://evil.example.com/?k=${SECRET}`);
+      res.end(`moved ${SECRET}`);
     },
     async (port) => {
       const { engine } = makeEngine(port);
       const result = await engine.execute({ credentialId: "local", method: "GET", url: `http://127.0.0.1:${port}/hop` });
       assert.equal(result.kind, "error");
+      assert.ok(result.kind === "error");
+      assert.equal(result.code, "redirect-refused");
+      assert.equal(hits, 1, "the redirect must not be followed");
+      assert.ok(!JSON.stringify(result).includes(SECRET), "neither Location nor the redirect body may reach the agent");
     },
   );
+});
+
+void test("an upstream error response echoing the secret is redacted, in any form", async () => {
+  const forms = [SECRET, SECRET.toUpperCase(), Buffer.from(SECRET, "utf8").toString("hex")];
+  for (const form of forms) {
+    await withUpstream(
+      (_req, res) => {
+        res.statusCode = 401;
+        res.setHeader("content-type", "text/plain");
+        res.end(`bad key ${form}`);
+      },
+      async (port) => {
+        const { engine } = makeEngine(port);
+        const result = await engine.execute({ credentialId: "local", method: "GET", url: `http://127.0.0.1:${port}/data` });
+        assert.ok(result.kind === "success");
+        assert.equal(result.status, 401);
+        assert.equal(result.body, "bad key [REDACTED]");
+      },
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
