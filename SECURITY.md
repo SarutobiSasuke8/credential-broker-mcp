@@ -14,8 +14,9 @@ likes, and it may be a compromised or prompt-injected model.
 **What the broker defends against that attacker**
 
 - It never receives a secret in any representation the broker creates:
-  raw, Base64, base64url, percent-encoded, form-encoded, NFC or NFD, in a
-  body, a header, an error message, a structured result or an audit line.
+  raw, hex, Base64, base64url, percent-encoded, form-encoded, NFC or NFD,
+  in a body, a header, an error message, a structured result or an audit
+  line. Raw, hex and percent-encoded forms match in any letter case.
 - It can only run the operations the policy names for its own identity:
   fixed method, path template, query parameter allowlist, body rules,
   response policy. An absent grant is a denial. Deny rules beat grants.
@@ -58,6 +59,11 @@ likes, and it may be a compromised or prompt-injected model.
 - **An upstream that transforms the secret** before echoing it (hash,
   encryption, a custom encoding). No redactor can recognise that. Scoped
   operations and metadata-only responses are the defence.
+- **An upstream that echoes part of the secret**, such as the first 12
+  characters or a masked `sk_...abcd`. Only whole values are matched: a
+  fragment of a credential like `user:password` is an ordinary word, and
+  matching it would cut that word out of every response. Metadata-only
+  responses are the defence here too.
 - **The upstream's own handling of the key.** Once sent, the key is in the
   provider's hands. The policy refuses a base URL that is not `https`
   (plain `http` is allowed on loopback only), and the broker uses TLS as
@@ -110,8 +116,9 @@ the `v0.1.0` tag exists; before that, `main` carries no support promise.
 The broker separates possession of a secret from use of a secret. The agent
 process on the other end of the stdio pipe is assumed hostile: it may send
 any tool input, and nothing it receives may contain a secret in any
-representation the broker created (raw, Base64, base64url,
-percent-encoding, form-encoding, NFC/NFD).
+representation the broker created (raw, hex, Base64, base64url,
+percent-encoding, form-encoding, NFC/NFD), or that same value in another
+letter case.
 
 What the broker does NOT defend by itself:
 
@@ -121,8 +128,8 @@ What the broker does NOT defend by itself:
   boundary under the secure-launch profile below.
 - **Hostile transformations.** An upstream that hashes, encrypts, or
   custom-encodes a secret before echoing it produces output no redactor can
-  recognise. Scoped operations and metadata-only responses are the defence,
-  not string matching.
+  recognise. Nor is a partial echo of a secret matched. Scoped operations
+  and metadata-only responses are the defence, not string matching.
 - **Host compromise.** Anything running as the same OS user as the broker
   can read whatever the broker can read.
 

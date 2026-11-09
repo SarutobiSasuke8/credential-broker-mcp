@@ -10,7 +10,7 @@ URL, checks a declarative per-operation policy, verifies any required
 approval at execution time, injects the secret at the last moment, calls
 the upstream, redacts and filters the response, and writes a content-free
 audit record. The secret lives with the broker process and is never
-relayed to the agent in any representation the broker creates: raw,
+relayed to the agent in any representation the broker creates: raw, hex,
 Base64, base64url, percent-encoded, form-encoded, or Unicode-normalised.
 An upstream that transforms a secret with a one-way function of its own
 defeats string matching; scoped operations and metadata-only responses are
@@ -219,9 +219,9 @@ old blast radius visible rather than silently preserving it.
   trailing-dot segments are rejected, not guessed at.
 - Secrets are injected into exactly one header or query parameter. One
   redactor covers response bodies, relayed headers, error chains, and
-  audit records, across raw, Base64, base64url, percent-encoded,
-  form-encoded, and NFC/NFD representations, including truncation
-  boundaries.
+  audit records, across raw, hex, Base64, base64url, percent-encoded,
+  form-encoded, and NFC/NFD representations, in any letter case for raw,
+  hex and percent-encoded forms, including truncation boundaries.
 - Raw upstream error text is never relayed to agents; they receive a
   stable error category and a trace id, and the redacted detail goes to
   the audit log.

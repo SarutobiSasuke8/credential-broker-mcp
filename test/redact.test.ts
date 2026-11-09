@@ -15,6 +15,35 @@ void test("the raw secret is redacted wherever it appears", () => {
   assert.equal(out.match(/\[REDACTED\]/gu)?.length, 2);
 });
 
+void test("hex forms are redacted in either case", () => {
+  const hex = Buffer.from(SECRET, "utf8").toString("hex");
+  for (const form of [hex, hex.toUpperCase()]) {
+    const out = redactor().redact(`digest ${form} end`);
+    assert.equal(out, "digest [REDACTED] end");
+  }
+});
+
+void test("the raw and percent-encoded forms are redacted in any letter case", () => {
+  const withSpecials = "Key/with+Specials=99";
+  const r = new SecretRedactor([withSpecials]);
+  const percent = encodeURIComponent(withSpecials);
+  for (const form of [withSpecials.toUpperCase(), withSpecials.toLowerCase(), percent.toLowerCase(), percent.toUpperCase()]) {
+    assert.equal(r.redact(`x ${form} y`), "x [REDACTED] y", form);
+  }
+});
+
+void test("a secret holding regex and replacement characters is matched literally", () => {
+  const odd = "a.b*c$&d(e)[f]{g}|h^i\\j?k+l/m";
+  const r = new SecretRedactor([odd]);
+  assert.equal(r.redact(`x ${odd} y`), "x [REDACTED] y");
+  assert.equal(r.redact("axbxc nothing to see"), "axbxc nothing to see");
+});
+
+void test("a fragment of a secret is not matched, as SECURITY.md states", () => {
+  const r = new SecretRedactor(["username:hunter2hunter2"]);
+  assert.equal(r.redact('{"username":"ada"}'), '{"username":"ada"}');
+});
+
 void test("the Basic-auth Base64 form is redacted", () => {
   const b64 = Buffer.from(SECRET, "utf8").toString("base64");
   const out = redactor().redact(`authorization echoed: Basic ${b64}.`);

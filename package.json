@@ -1,6 +1,6 @@
 {
   "name": "@sarutobi-sasuke/credential-broker-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "mcpName": "io.github.SarutobiSasuke8/credential-broker-mcp",
   "description": "Local-first MCP credential broker: agents use gated APIs through scoped, audited requests without ever seeing the secret.",
   "license": "Apache-2.0",
